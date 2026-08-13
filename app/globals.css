@@ -1,0 +1,31 @@
+@import "tailwindcss";
+
+:root {
+  --paper: #f3ead8;
+  --ink: #1c140c;
+  --red: #c1121f;
+  --green: #1b7a4a;
+}
+
+@theme inline {
+  --color-paper: var(--paper);
+  --color-ink: var(--ink);
+  --color-red: var(--red);
+  --color-green: var(--green);
+  --font-sans: var(--font-geist-sans);
+  --font-display: var(--font-anton);
+}
+
+html,
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+}
+
+.font-display {
+  font-family: var(--font-display), Impact, "Arial Black", sans-serif;
+  font-weight: 400;
+  letter-spacing: -0.04em;
+  text-transform: uppercase;
+}
