@@ -47,6 +47,28 @@ test("NCR headline applies to Quezon City", () => {
   assert.equal(placeMentions(title, dagupan), false);
 });
 
+const ncr = {
+  name: "Metro Manila",
+  province: "NCR",
+  island: "luzon" as const,
+  ncr: true,
+  aliases: ["NCR", "National Capital Region", "Kalakhang Maynila"],
+};
+
+test("Caloocan-only headline does not count as all of Metro Manila", () => {
+  assert.equal(
+    placeMentions("Walang pasok in Caloocan City, all levels", ncr),
+    false,
+  );
+  assert.equal(
+    placeMentions(
+      "Walang pasok in Metro Manila: class suspension for Thursday due to habagat",
+      ncr,
+    ),
+    true,
+  );
+});
+
 test("work and government are separate from classes", () => {
   const title =
     "Work in government and private offices also suspended in Dagupan City";

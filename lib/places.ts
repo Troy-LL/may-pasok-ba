@@ -1,8 +1,8 @@
-import places0 from "@/data/places.json";
-import places1 from "@/data/places-1.json";
-import places2 from "@/data/places-2.json";
+import places0 from "../data/places.json" with { type: "json" };
+import places1 from "../data/places-1.json" with { type: "json" };
+import places2 from "../data/places-2.json" with { type: "json" };
 
-export type PlaceKind = "city" | "municipality";
+export type PlaceKind = "city" | "municipality" | "region";
 export type Island = "luzon" | "visayas" | "mindanao";
 
 export type Place = {
@@ -15,43 +15,55 @@ export type Place = {
   aliases: string[];
 };
 
-const PLACES: Place[] = [...places0, ...places1, ...places2];
+/** Not an LGU — NCR-wide announcements. Keep out of the JSON shards. */
+const METRO_MANILA: Place = {
+  id: "metro-manila",
+  name: "Metro Manila",
+  province: "NCR",
+  island: "luzon",
+  ncr: true,
+  kind: "region",
+  aliases: ["NCR", "National Capital Region", "Kalakhang Maynila"],
+};
+
+const LGUS = [...places0, ...places1, ...places2] as Place[];
+const PLACES: Place[] = [METRO_MANILA, ...LGUS];
+const NCR_PLACES = PLACES.filter((p) => p.ncr);
 
 const BY_ID = new Map(PLACES.map((p) => [p.id, p]));
 
 export const DEFAULT_PLACE_ID = "quezon-city";
 
 const PINNED_IDS = [
+  "metro-manila",
   "quezon-city",
   "manila",
-  "cebu",
-  "davao",
   "caloocan",
   "taguig",
   "pasig",
   "makati",
-  "cagayan-de-oro",
-  "zamboanga",
-  "antipolo",
-  "dasmarinas",
-  "bacoor",
-  "iloilo",
-  "bacolod",
-  "cainta",
-  "baguio",
-  "general-santos",
-  "valenzuela",
+  "mandaluyong",
+  "marikina",
+  "pasay",
   "paranaque",
+  "las-pinas",
+  "muntinlupa",
+  "valenzuela",
+  "malabon",
+  "navotas",
+  "san-juan",
+  "pateros",
 ];
 
-export const WARM_PLACE_IDS = PINNED_IDS;
+export const WARM_PLACE_IDS = NCR_PLACES.map((p) => p.id);
 
 export function allPlaces(): Place[] {
-  return PLACES;
+  return NCR_PLACES;
 }
 
 export function getPlace(id: string): Place | undefined {
-  return BY_ID.get(id);
+  const place = BY_ID.get(id);
+  return place?.ncr ? place : undefined;
 }
 
 export function labelOf(place: Place): string {
@@ -60,10 +72,23 @@ export function labelOf(place: Place): string {
 
 export function pickerPlaces(): Place[] {
   const pinned = PINNED_IDS.map((id) => BY_ID.get(id)).filter(
-    (p): p is Place => p !== undefined,
+    (p): p is Place => p !== undefined && p.ncr,
   );
-  const rest = PLACES.filter((p) => !PINNED_IDS.includes(p.id));
+  const rest = NCR_PLACES.filter((p) => !PINNED_IDS.includes(p.id));
   return [...pinned, ...rest];
+}
+
+export function filterPlaces(query: string, limit = 20): Place[] {
+  const all = pickerPlaces();
+  const q = slug(query);
+  if (!q) return all;
+  return all
+    .filter((p) => {
+      if (slug(labelOf(p)).includes(q) || slug(p.name).includes(q)) return true;
+      if (slug(p.province).includes(q)) return true;
+      return p.aliases.some((a) => slug(a).includes(q));
+    })
+    .slice(0, limit);
 }
 
 function slug(s: string): string {
@@ -77,18 +102,19 @@ function slug(s: string): string {
 }
 
 export function resolvePlace(input: string): Place {
+  const fallback = BY_ID.get("metro-manila") ?? METRO_MANILA;
   const trimmed = input.trim();
   if (!trimmed) {
-    return BY_ID.get(DEFAULT_PLACE_ID) ?? PLACES[0];
+    return BY_ID.get(DEFAULT_PLACE_ID) ?? fallback;
   }
-  const byId = BY_ID.get(trimmed) ?? BY_ID.get(slug(trimmed));
+  const byId = getPlace(trimmed) ?? getPlace(slug(trimmed));
   if (byId) return byId;
 
   const q = slug(trimmed);
-  const labeled = PLACES.find((p) => slug(labelOf(p)) === q);
+  const labeled = NCR_PLACES.find((p) => slug(labelOf(p)) === q);
   if (labeled) return labeled;
 
-  const nameHit = PLACES.find(
+  const nameHit = NCR_PLACES.find(
     (p) =>
       slug(p.name) === q ||
       p.aliases.some((a) => slug(a) === q) ||
@@ -96,20 +122,12 @@ export function resolvePlace(input: string): Place {
   );
   if (nameHit) return nameHit;
 
-  const contains = PLACES.find(
+  const contains = NCR_PLACES.find(
     (p) => slug(p.name).includes(q) || q.includes(slug(p.name)),
   );
   if (contains) return contains;
 
-  return {
-    id: q || DEFAULT_PLACE_ID,
-    name: trimmed,
-    province: "Philippines",
-    island: "luzon",
-    ncr: false,
-    kind: "municipality",
-    aliases: [],
-  };
+  return fallback;
 }
 
 export function matchGeo(parts: {
@@ -129,7 +147,7 @@ export function matchGeo(parts: {
   const loc = slug(locality);
   const prov = slug(province);
 
-  const inProvince = PLACES.filter((p) => {
+  const inProvince = NCR_PLACES.filter((p) => {
     if (slug(p.name) !== loc && !p.aliases.some((a) => slug(a) === loc)) {
       return false;
     }
@@ -142,5 +160,5 @@ export function matchGeo(parts: {
       inProvince.find((p) => slug(p.province) === prov) ?? inProvince[0]
     );
   }
-  return resolvePlace(locality);
+  return undefined;
 }
