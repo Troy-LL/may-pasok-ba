@@ -1,0 +1,31 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "may-pasok-ba",
+  "main": "./custom-worker.ts",
+  "compatibility_date": "2026-08-16",
+  "compatibility_flags": [
+    "nodejs_compat",
+    "global_fetch_strictly_public"
+  ],
+  "assets": {
+    "directory": "./out",
+    "binding": "ASSETS"
+  },
+  "browser": {
+    "binding": "BROWSER"
+  },
+  "routes": [
+    {
+      "pattern": "may-pasok-ba.niched.tech",
+      "custom_domain": true
+    }
+  ],
+  "triggers": {
+    "crons": [
+      "0 21 * * *"
+    ]
+  },
+  "observability": {
+    "enabled": true
+  }
+}

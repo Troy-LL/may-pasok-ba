@@ -1,7 +1,18 @@
+"use client";
+
+import { Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import { Board } from "@/components/board";
 
-export default async function Home({ searchParams }: PageProps<"/">) {
-  const params = await searchParams;
-  const placeId = typeof params.place === "string" ? params.place : undefined;
+function HomeContent() {
+  const placeId = useSearchParams().get("place") ?? undefined;
   return <Board initialPlaceId={placeId} />;
+}
+
+export default function Home() {
+  return (
+    <Suspense>
+      <HomeContent />
+    </Suspense>
+  );
 }

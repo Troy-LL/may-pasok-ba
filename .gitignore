@@ -15,10 +15,12 @@
 
 # next.js
 /.next/
+/.open-next/
 /out/
 
 # production
 /build
+/.wrangler*/
 
 # misc
 .DS_Store
