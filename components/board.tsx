@@ -1,13 +1,16 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
+import appIcon from "@/app/icon.png";
 import type { Kind, Verdict } from "@/lib/classify";
+import type { Confidence } from "@/lib/news";
 import {
   DEFAULT_PLACE_ID,
+  filterPlaces,
   getPlace,
   labelOf,
-  pickerPlaces,
   resolvePlace,
   type Place,
 } from "@/lib/places";
@@ -17,9 +20,24 @@ type StatusResult =
   | {
       ok: true;
       verdicts: Record<Kind, Verdict>;
+      confidence: Record<Kind, Confidence>;
+      asOf: string;
       headlines: HeadlineHit[];
     }
   | { ok: false; error: string };
+
+type WeeklyDay = {
+  date: string;
+  verdicts: Record<Kind, Verdict>;
+};
+
+type WeeklyResult =
+  | { ok: true; days: WeeklyDay[] }
+  | { ok: false; error: string };
+
+function isConfidence(value: unknown): value is Confidence {
+  return value === "none" || value === "reported" || value === "confirmed";
+}
 
 function isVerdict(value: unknown): value is Verdict {
   return value === "WALA" || value === "MERON";
@@ -27,27 +45,52 @@ function isVerdict(value: unknown): value is Verdict {
 
 function readStatus(value: unknown): StatusResult {
   if (typeof value !== "object" || value === null) {
-    return { ok: false, error: "hindi makuha ang news ngayon" };
+    return { ok: false, error: "could not load news right now" };
   }
   if ("ok" in value && value.ok === false) {
     const error =
       "error" in value && typeof value.error === "string"
         ? value.error
-        : "hindi makuha ang news ngayon";
+        : "could not load news right now";
     return { ok: false, error };
   }
-  if (!("ok" in value) || value.ok !== true || !("verdicts" in value) || !("headlines" in value)) {
-    return { ok: false, error: "hindi makuha ang news ngayon" };
+  if (
+    !("ok" in value) ||
+    value.ok !== true ||
+    !("verdicts" in value) ||
+    !("headlines" in value) ||
+    !("confidence" in value) ||
+    !("asOf" in value)
+  ) {
+    return { ok: false, error: "could not load news right now" };
   }
-  const { verdicts, headlines } = value;
-  if (typeof verdicts !== "object" || verdicts === null || !Array.isArray(headlines)) {
-    return { ok: false, error: "hindi makuha ang news ngayon" };
+  const { verdicts, headlines, confidence, asOf } = value;
+  if (
+    typeof verdicts !== "object" ||
+    verdicts === null ||
+    !Array.isArray(headlines) ||
+    typeof confidence !== "object" ||
+    confidence === null ||
+    typeof asOf !== "string"
+  ) {
+    return { ok: false, error: "could not load news right now" };
   }
   const classes = "classes" in verdicts ? verdicts.classes : undefined;
   const work = "work" in verdicts ? verdicts.work : undefined;
   const government = "government" in verdicts ? verdicts.government : undefined;
-  if (!isVerdict(classes) || !isVerdict(work) || !isVerdict(government)) {
-    return { ok: false, error: "hindi makuha ang news ngayon" };
+  const classesConf = "classes" in confidence ? confidence.classes : undefined;
+  const workConf = "work" in confidence ? confidence.work : undefined;
+  const governmentConf =
+    "government" in confidence ? confidence.government : undefined;
+  if (
+    !isVerdict(classes) ||
+    !isVerdict(work) ||
+    !isVerdict(government) ||
+    !isConfidence(classesConf) ||
+    !isConfidence(workConf) ||
+    !isConfidence(governmentConf)
+  ) {
+    return { ok: false, error: "could not load news right now" };
   }
   const hits: HeadlineHit[] = [];
   for (const h of headlines) {
@@ -62,8 +105,69 @@ function readStatus(value: unknown): StatusResult {
   return {
     ok: true,
     verdicts: { classes, work, government },
+    confidence: {
+      classes: classesConf,
+      work: workConf,
+      government: governmentConf,
+    },
+    asOf,
     headlines: hits,
   };
+}
+
+function readWeekly(value: unknown): WeeklyResult {
+  if (typeof value !== "object" || value === null) {
+    return { ok: false, error: "could not load weekly news right now" };
+  }
+  if ("ok" in value && value.ok === false) {
+    return {
+      ok: false,
+      error:
+        "error" in value && typeof value.error === "string"
+          ? value.error
+          : "could not load weekly news right now",
+    };
+  }
+  if (!("ok" in value) || value.ok !== true || !("days" in value)) {
+    return { ok: false, error: "could not load weekly news right now" };
+  }
+  if (!Array.isArray(value.days)) {
+    return { ok: false, error: "could not load weekly news right now" };
+  }
+
+  const days: WeeklyDay[] = [];
+  for (const day of value.days) {
+    if (
+      typeof day !== "object" ||
+      day === null ||
+      !("date" in day) ||
+      typeof day.date !== "string" ||
+      !("verdicts" in day) ||
+      typeof day.verdicts !== "object" ||
+      day.verdicts === null
+    ) {
+      continue;
+    }
+    const classes =
+      "classes" in day.verdicts ? day.verdicts.classes : undefined;
+    const work = "work" in day.verdicts ? day.verdicts.work : undefined;
+    const government =
+      "government" in day.verdicts ? day.verdicts.government : undefined;
+    if (
+      isVerdict(classes) &&
+      isVerdict(work) &&
+      isVerdict(government)
+    ) {
+      days.push({
+        date: day.date,
+        verdicts: { classes, work, government },
+      });
+    }
+  }
+
+  return days.length === 7
+    ? { ok: true, days }
+    : { ok: false, error: "weekly news summary was incomplete" };
 }
 
 function readGeo(value: unknown): { ok: true; place: Place } | { ok: false; error: string } {
@@ -95,22 +199,54 @@ function readGeo(value: unknown): { ok: true; place: Place } | { ok: false; erro
 }
 
 const KINDS: { id: Kind; label: string }[] = [
-  { id: "classes", label: "klase" },
-  { id: "work", label: "trabaho" },
-  { id: "government", label: "gobyerno" },
+  { id: "classes", label: "classes" },
+  { id: "work", label: "work" },
+  { id: "government", label: "government" },
 ];
+
+function confidenceCaption(confidence: Confidence): string {
+  if (confidence === "confirmed") return "2 outlets";
+  if (confidence === "reported") return "1 outlet";
+  return "no matching news";
+}
+
+function formatAsOf(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  return new Intl.DateTimeFormat("en-PH", {
+    timeZone: "Asia/Manila",
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date);
+}
+
+function formatDay(date: string): string {
+  const parsed = new Date(`${date}T12:00:00Z`);
+  if (Number.isNaN(parsed.getTime())) return date;
+  return new Intl.DateTimeFormat("en-PH", {
+    timeZone: "Asia/Manila",
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  }).format(parsed);
+}
 
 export function Board({ initialPlaceId }: { initialPlaceId?: string }) {
   const router = useRouter();
-  const options = useMemo(() => pickerPlaces(), []);
   const place =
     getPlace(initialPlaceId ?? DEFAULT_PLACE_ID) ??
     resolvePlace(initialPlaceId ?? "Quezon City");
   const [typed, setTyped] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
   const query = typed ?? labelOf(place);
+  const suggestions = useMemo(() => filterPlaces(typed ?? ""), [typed]);
   const [result, setResult] = useState<{
     id: string;
     status: StatusResult;
+  } | null>(null);
+  const [weeklyResult, setWeeklyResult] = useState<{
+    id: string;
+    status: WeeklyResult;
   } | null>(null);
   const [locating, setLocating] = useState(false);
   const [locNote, setLocNote] = useState<string | null>(null);
@@ -166,7 +302,33 @@ export function Board({ initialPlaceId }: { initialPlaceId?: string }) {
         if (!cancelled) {
           setResult({
             id,
-            status: { ok: false, error: "hindi makuha ang news ngayon" },
+            status: { ok: false, error: "could not load news right now" },
+          });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [place.id]);
+
+  useEffect(() => {
+    const id = place.id;
+    let cancelled = false;
+    fetch(`/api/history?place=${encodeURIComponent(id)}`)
+      .then(async (res) => {
+        const body: unknown = await res.json();
+        if (!cancelled) {
+          setWeeklyResult({ id, status: readWeekly(body) });
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setWeeklyResult({
+            id,
+            status: {
+              ok: false,
+              error: "could not load weekly news right now",
+            },
           });
         }
       });
@@ -207,34 +369,86 @@ export function Board({ initialPlaceId }: { initialPlaceId?: string }) {
 
   const status = result?.id === place.id ? result.status : null;
   const verdicts = status && status.ok ? status.verdicts : null;
+  const confidence = status && status.ok ? status.confidence : null;
+  const asOf = status && status.ok ? status.asOf : null;
+  const weekly =
+    weeklyResult?.id === place.id ? weeklyResult.status : null;
   const loading = status === null;
 
   return (
     <div className="flex min-h-full flex-1 flex-col px-4 py-6 sm:px-8 sm:py-10">
       <header className="mx-auto w-full max-w-5xl">
-        <h1 className="text-2xl font-medium tracking-tight">May Pasok Ba?</h1>
+        <h1 className="flex items-center gap-2 text-2xl font-medium tracking-tight">
+          <Image
+            src={appIcon}
+            alt=""
+            width={36}
+            height={36}
+            className="rounded-lg"
+            priority
+          />
+          May Pasok Ba?
+        </h1>
         <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-end">
-          <label className="block min-w-0 flex-1">
+          <label className="relative block min-w-0 flex-1">
             <span className="sr-only">Lungsod o bayan</span>
             <input
-              list="places"
+              role="combobox"
+              aria-expanded={open}
+              aria-controls="place-list"
+              aria-autocomplete="list"
+              autoComplete="off"
               value={query}
-              onChange={(e) => setTyped(e.target.value)}
-              onBlur={() => applyPlace(resolvePlace(query))}
+              onChange={(e) => {
+                setTyped(e.target.value);
+                setOpen(true);
+              }}
+              onFocus={(e) => {
+                e.currentTarget.select();
+                setOpen(true);
+              }}
+              onBlur={() => {
+                setOpen(false);
+                if (typed !== null) applyPlace(resolvePlace(typed));
+              }}
               onKeyDown={(e) => {
+                if (e.key === "Escape") {
+                  setTyped(null);
+                  setOpen(false);
+                  return;
+                }
                 if (e.key === "Enter") {
                   e.preventDefault();
+                  setOpen(false);
                   applyPlace(resolvePlace(query));
                 }
               }}
-              placeholder="Quezon City, Metro Manila"
+              placeholder="Metro Manila, NCR"
               className="w-full border-b-2 border-ink bg-transparent pb-2 text-2xl font-medium tracking-tight outline-none placeholder:text-ink/30 focus:border-red"
             />
-            <datalist id="places">
-              {options.map((p) => (
-                <option key={p.id} value={labelOf(p)} />
-              ))}
-            </datalist>
+            {open ? (
+              <ul
+                id="place-list"
+                role="listbox"
+                className="absolute z-10 mt-1 max-h-64 w-full overflow-auto border-2 border-ink bg-paper"
+              >
+                {suggestions.map((p) => (
+                  <li key={p.id} role="option" aria-selected={false}>
+                    <button
+                      type="button"
+                      className="w-full px-3 py-2 text-left text-base hover:bg-ink hover:text-paper"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => {
+                        setOpen(false);
+                        applyPlace(p);
+                      }}
+                    >
+                      {labelOf(p)}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
           </label>
           <button
             type="button"
@@ -253,36 +467,92 @@ export function Board({ initialPlaceId }: { initialPlaceId?: string }) {
             key={k.id}
             label={k.label}
             value={loading ? null : verdicts ? verdicts[k.id] : null}
+            caption={
+              loading || !confidence
+                ? null
+                : confidenceCaption(confidence[k.id])
+            }
             featured={i === 0}
           />
         ))}
       </main>
 
+      <section className="mx-auto mt-14 w-full max-w-5xl border-t-2 border-ink pt-6">
+        <h2 className="text-sm uppercase tracking-[0.25em] text-ink/50">
+          7-day news evidence
+        </h2>
+        <p className="mt-2 text-sm text-ink/55">
+          WALA means an allowlisted suspension headline matched that day.
+          MERON means no matching headline, not an official all-clear.
+        </p>
+        {weekly === null ? (
+          <p className="mt-5 text-sm text-ink/55">loading week…</p>
+        ) : weekly.ok ? (
+          <div className="mt-5 overflow-x-auto">
+            <div className="grid min-w-[36rem] grid-cols-[9rem_repeat(3,1fr)] border-b border-ink/25 pb-2 text-xs uppercase tracking-wider text-ink/50">
+              <span>date</span>
+              {KINDS.map((kind) => (
+                <span key={kind.id}>{kind.label}</span>
+              ))}
+            </div>
+            {weekly.days.map((day) => (
+              <div
+                key={day.date}
+                className="grid min-w-[36rem] grid-cols-[9rem_repeat(3,1fr)] border-b border-ink/15 py-3 text-sm"
+              >
+                <time dateTime={day.date}>{formatDay(day.date)}</time>
+                {KINDS.map((kind) => {
+                  const verdict = day.verdicts[kind.id];
+                  return (
+                    <span
+                      key={kind.id}
+                      className={
+                        verdict === "WALA" ? "text-red" : "text-green"
+                      }
+                    >
+                      {verdict}
+                    </span>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="mt-5 text-sm text-red">{weekly.error}</p>
+        )}
+      </section>
+
       <footer className="mx-auto mt-12 w-full max-w-5xl text-sm text-ink/55">
         {status && !status.ok ? <p className="text-red">{status.error}</p> : null}
-        {status && status.ok && status.headlines.length > 0 ? (
-          <details className="mb-4">
-            <summary className="cursor-pointer select-none">bakit?</summary>
-            <ul className="mt-3 space-y-2">
-              {status.headlines.map((h) => (
-                <li key={h.link || h.title}>
-                  <a
-                    href={h.link}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="underline decoration-ink/30 hover:decoration-ink"
-                  >
-                    {h.title}
-                  </a>
-                  {h.source ? <span> · {h.source}</span> : null}
-                </li>
-              ))}
-            </ul>
+        {status && status.ok ? (
+          <details className="mb-4" open={status.headlines.length > 0}>
+            <summary className="cursor-pointer select-none">why?</summary>
+            {status.headlines.length > 0 ? (
+              <ul className="mt-3 space-y-2">
+                {status.headlines.map((h) => (
+                  <li key={h.link || h.title}>
+                    <a
+                      href={h.link}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="underline decoration-ink/30 hover:decoration-ink"
+                    >
+                      {h.title}
+                    </a>
+                    {h.source ? <span> · {h.source}</span> : null}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-3">
+                No matching headlines in the last 36 hours.
+              </p>
+            )}
           </details>
         ) : null}
         <p>
-          kuha sa local news tuwing 5:00 AM (PHT). hindi ito opisyal na anunsyo
-          ng LGU.
+          {asOf ? `As of ${formatAsOf(asOf)} (Manila). ` : null}
+          From allowlisted local news. This is not an official LGU announcement.
         </p>
       </footer>
     </div>
@@ -292,10 +562,12 @@ export function Board({ initialPlaceId }: { initialPlaceId?: string }) {
 function VerdictBlock({
   label,
   value,
+  caption,
   featured,
 }: {
   label: string;
   value: Verdict | null;
+  caption: string | null;
   featured: boolean;
 }) {
   const color =
@@ -312,6 +584,9 @@ function VerdictBlock({
       >
         {value ?? "···"}
       </p>
+      {caption ? (
+        <p className="mt-2 text-sm text-ink/55">{caption}</p>
+      ) : null}
     </section>
   );
 }
