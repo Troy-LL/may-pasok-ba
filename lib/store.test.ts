@@ -1,0 +1,164 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import type { Headline } from "./rss.ts";
+import {
+  cachedHeadlines,
+  decodeHeadlines,
+  encodeHeadlines,
+  newsKey,
+  singleFlight,
+  type HeadlineStore,
+} from "./store.ts";
+
+const headline: Headline = {
+  title: "Walang pasok in Metro Manila",
+  link: "https://example.com/gma",
+  source: "GMA Network",
+  publishedAt: new Date("2026-08-13T10:00:00Z"),
+};
+
+function memoryStore(seed: Record<string, string> = {}) {
+  const data = new Map(Object.entries(seed));
+  const puts: string[] = [];
+  const store: HeadlineStore = {
+    async get(key) {
+      return data.get(key) ?? null;
+    },
+    async put(key, value) {
+      puts.push(key);
+      data.set(key, value);
+    },
+  };
+  return { store, data, puts };
+}
+
+test("encoded headlines survive a round trip with dates", () => {
+  const fetchedAt = new Date("2026-08-13T21:00:00Z");
+  const decoded = decodeHeadlines(encodeHeadlines([headline], fetchedAt));
+
+  assert.equal(decoded?.fetchedAt.toISOString(), fetchedAt.toISOString());
+  assert.equal(decoded?.headlines.length, 1);
+  assert.equal(decoded?.headlines[0].title, headline.title);
+  assert.equal(
+    decoded?.headlines[0].publishedAt.toISOString(),
+    headline.publishedAt.toISOString(),
+  );
+});
+
+test("decode rejects missing and malformed entries", () => {
+  assert.equal(decodeHeadlines(null), null);
+  assert.equal(decodeHeadlines("not json"), null);
+  assert.equal(decodeHeadlines('{"headlines":[]}'), null);
+});
+
+test("fresh cache entries skip the network", async () => {
+  const now = new Date("2026-08-13T21:00:00Z");
+  const { store, puts } = memoryStore({
+    [newsKey("manila")]: encodeHeadlines(
+      [headline],
+      new Date("2026-08-13T20:55:00Z"),
+    ),
+  });
+
+  let loads = 0;
+  const headlines = await cachedHeadlines(store, "manila", now, async () => {
+    loads += 1;
+    return [];
+  });
+
+  assert.equal(loads, 0);
+  assert.equal(puts.length, 0);
+  assert.equal(headlines.length, 1);
+});
+
+test("stale cache entries are refreshed and written back", async () => {
+  const now = new Date("2026-08-13T21:00:00Z");
+  const { store, data } = memoryStore({
+    [newsKey("manila")]: encodeHeadlines(
+      [],
+      new Date("2026-08-13T18:00:00Z"),
+    ),
+  });
+
+  const headlines = await cachedHeadlines(store, "manila", now, async () => [
+    headline,
+  ]);
+
+  assert.equal(headlines.length, 1, "refreshed headlines are returned");
+  assert.equal(
+    decodeHeadlines(data.get(newsKey("manila")) ?? null)?.fetchedAt.toISOString(),
+    now.toISOString(),
+  );
+});
+
+test("a failed refresh serves the stale entry instead of throwing", async () => {
+  const now = new Date("2026-08-13T21:00:00Z");
+  const { store } = memoryStore({
+    [newsKey("manila")]: encodeHeadlines(
+      [headline],
+      new Date("2026-08-13T12:00:00Z"),
+    ),
+  });
+
+  const headlines = await cachedHeadlines(store, "manila", now, async () => {
+    throw new Error("news 503");
+  });
+
+  assert.equal(headlines.length, 1);
+});
+
+test("stale entries are served at once and refreshed in the background", async () => {
+  const now = new Date("2026-08-13T21:00:00Z");
+  const { store, data } = memoryStore({
+    [newsKey("manila")]: encodeHeadlines([], new Date("2026-08-13T18:00:00Z")),
+  });
+
+  const background: Promise<unknown>[] = [];
+  const headlines = await cachedHeadlines(
+    store,
+    "manila",
+    now,
+    async () => [headline],
+    { revalidate: (promise) => background.push(promise) },
+  );
+
+  assert.equal(headlines.length, 0);
+  assert.equal(background.length, 1);
+
+  await Promise.all(background);
+  assert.equal(
+    decodeHeadlines(data.get(newsKey("manila")) ?? null)?.headlines.length,
+    1,
+  );
+});
+
+test("a failed load with no cache entry rejects", async () => {
+  const { store } = memoryStore();
+
+  await assert.rejects(
+    cachedHeadlines(store, "manila", new Date(), async () => {
+      throw new Error("news 503");
+    }),
+    /news 503/,
+  );
+});
+
+test("single flight shares one load between concurrent callers", async () => {
+  const flight = singleFlight<number>();
+  let loads = 0;
+  const load = async () => {
+    loads += 1;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    return loads;
+  };
+
+  const [a, b] = await Promise.all([
+    flight("manila", load),
+    flight("manila", load),
+  ]);
+
+  assert.equal(loads, 1);
+  assert.equal(a, 1);
+  assert.equal(b, 1);
+  assert.equal(await flight("manila", load), 2);
+});

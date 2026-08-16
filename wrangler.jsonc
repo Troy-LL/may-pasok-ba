@@ -14,6 +14,12 @@
   "browser": {
     "binding": "BROWSER"
   },
+  "kv_namespaces": [
+    {
+      "binding": "NEWS",
+      "id": "06686e0cc6134ef2811b01317eebe011"
+    }
+  ],
   "routes": [
     {
       "pattern": "may-pasok-ba.niched.tech",

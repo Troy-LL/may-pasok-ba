@@ -1,5 +1,9 @@
 import puppeteer from "@cloudflare/puppeteer";
-import { getStatus, getWeeklySummary } from "./lib/news.ts";
+import {
+  fetchHeadlines,
+  statusFromHeadlines,
+  weeklyFromHeadlines,
+} from "./lib/news.ts";
 import {
   WARM_PLACE_IDS,
   getPlace,
@@ -7,6 +11,9 @@ import {
   resolvePlace,
 } from "./lib/places.ts";
 import { isCronAuthorized } from "./lib/cron.ts";
+import { cachedHeadlines, putHeadlines, singleFlight } from "./lib/store.ts";
+import type { Headline } from "./lib/rss.ts";
+import type { Place } from "./lib/places.ts";
 
 type Env = CloudflareEnv & {
   CRON_SECRET?: string;
@@ -75,26 +82,63 @@ async function browserRss(env: Env, url: string): Promise<string> {
   }
 }
 
-async function statusWithEnv(request: Request, env: Env): Promise<Response> {
-  const url = new URL(request.url);
-  const q = url.searchParams.get("place") ?? "";
-  const result = await getStatus(
-    getPlace(q) ?? resolvePlace(q),
-    new Date(),
-    (rssUrl) => browserRss(env, rssUrl),
-  );
-  return json(result, result.ok ? 200 : 502, 1200);
+const inFlight = singleFlight<Headline[]>();
+
+function placeFor(request: Request): Place {
+  const q = new URL(request.url).searchParams.get("place") ?? "";
+  return getPlace(q) ?? resolvePlace(q);
 }
 
-async function history(request: Request, env: Env): Promise<Response> {
-  const url = new URL(request.url);
-  const q = url.searchParams.get("place") ?? "";
-  const result = await getWeeklySummary(
-    getPlace(q) ?? resolvePlace(q),
-    new Date(),
-    (rssUrl) => browserRss(env, rssUrl),
+function headlinesFor(
+  place: Place,
+  env: Env,
+  ctx: ExecutionContext,
+  now: Date,
+): Promise<Headline[]> {
+  return inFlight(place.id, () =>
+    cachedHeadlines(
+      env.NEWS,
+      place.id,
+      now,
+      () => fetchHeadlines(place, (rssUrl) => browserRss(env, rssUrl)),
+      { revalidate: (refresh) => ctx.waitUntil(refresh) },
+    ),
   );
-  return json(result, result.ok ? 200 : 502, 1200);
+}
+
+async function status(
+  request: Request,
+  env: Env,
+  ctx: ExecutionContext,
+): Promise<Response> {
+  const place = placeFor(request);
+  const now = new Date();
+  try {
+    const headlines = await headlinesFor(place, env, ctx, now);
+    return json(statusFromHeadlines(headlines, place, now), 200, 1200);
+  } catch (error) {
+    console.error("Current news load failed", error);
+    return json({ ok: false, error: "could not load news right now" }, 502);
+  }
+}
+
+async function history(
+  request: Request,
+  env: Env,
+  ctx: ExecutionContext,
+): Promise<Response> {
+  const place = placeFor(request);
+  const now = new Date();
+  try {
+    const headlines = await headlinesFor(place, env, ctx, now);
+    return json(weeklyFromHeadlines(headlines, place, now), 200, 1200);
+  } catch (error) {
+    console.error("Weekly news load failed", error);
+    return json(
+      { ok: false, error: "could not load weekly news right now" },
+      502,
+    );
+  }
 }
 
 async function geo(request: Request): Promise<Response> {
@@ -132,10 +176,15 @@ async function warmNews(env: Env): Promise<string[]> {
     for (const id of WARM_PLACE_IDS) {
       const place = getPlace(id);
       if (!place) continue;
-      await getStatus(place, new Date(), (rssUrl) =>
-        browserPageRss(browser, rssUrl),
-      );
-      warmed.push(id);
+      try {
+        const headlines = await fetchHeadlines(place, (rssUrl) =>
+          browserPageRss(browser, rssUrl),
+        );
+        await putHeadlines(env.NEWS, id, headlines, new Date());
+        warmed.push(id);
+      } catch (error) {
+        console.error(`Warm failed for ${id}`, error);
+      }
     }
   } finally {
     await browser.close();
@@ -152,10 +201,10 @@ async function api(
   if (request.method !== "GET") return json({ ok: false }, 405);
 
   if (url.pathname === "/api/status") {
-    return cached(request, ctx, 1200, () => statusWithEnv(request, env));
+    return cached(request, ctx, 1200, () => status(request, env, ctx));
   }
   if (url.pathname === "/api/history") {
-    return cached(request, ctx, 1200, () => history(request, env));
+    return cached(request, ctx, 1200, () => history(request, env, ctx));
   }
   if (url.pathname === "/api/geo") {
     return cached(request, ctx, 86400, () => geo(request));
