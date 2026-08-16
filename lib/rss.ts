@@ -3,6 +3,7 @@ export type Headline = {
   link: string;
   publishedAt: Date;
   source: string;
+  body?: string;
 };
 
 function decodeXml(s: string): string {
