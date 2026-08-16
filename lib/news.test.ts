@@ -4,6 +4,7 @@ import type { Place } from "./places.ts";
 import {
   parseRss2Json,
   scoreHeadlines,
+  statusFromHeadlines,
   summarizeWeek,
   type Headline,
 } from "./news.ts";
@@ -184,6 +185,26 @@ test("weekly summary uses the suspension date in a roundup title", () => {
   assert.equal(days[0].date, "2026-08-17");
   assert.equal(days[0].verdicts.classes, "WALA");
   assert.equal(days[1].verdicts.classes, "MERON");
+});
+
+test("status carries the week so one request can fill the board", () => {
+  const status = statusFromHeadlines(
+    [
+      headline(
+        "Walang pasok in Metro Manila: class suspension for Thursday",
+        "GMA Network",
+      ),
+    ],
+    metroManila,
+    now,
+  );
+
+  assert.equal(status.verdicts.classes, "WALA");
+  assert.equal(status.days.length, 7);
+  assert.equal(
+    status.days.find((day) => day.date === "2026-08-13")?.verdicts.classes,
+    "WALA",
+  );
 });
 
 test("article body can place a generic roundup without leaking other-place kinds", () => {

@@ -26,6 +26,7 @@ export type StatusOk = {
   verdicts: Record<Kind, Verdict>;
   confidence: Record<Kind, Confidence>;
   headlines: HeadlineHit[];
+  days: WeekDay[];
 };
 
 export type StatusErr = {
@@ -315,21 +316,18 @@ export function summarizeWeek(
   });
 }
 
-export async function getStatus(
+export function fetchHeadlines(
   place: Place,
-  now = new Date(),
   rssFallback?: RssFallback,
-): Promise<StatusResult> {
-  let headlines: Headline[];
-  try {
-    headlines = await loadRss(queryFor(place, "7d"), rssFallback);
-  } catch (error) {
-    console.error("Current news load failed", error);
-    return { ok: false, error: "could not load news right now" };
-  }
+): Promise<Headline[]> {
+  return loadRss(queryFor(place, "7d"), rssFallback);
+}
 
-  const scored = scoreHeadlines(headlines, place, now);
-
+export function statusFromHeadlines(
+  headlines: Headline[],
+  place: Place,
+  now: Date,
+): StatusOk {
   const phDate = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Manila",
     year: "numeric",
@@ -342,23 +340,16 @@ export async function getStatus(
     place,
     asOf: now.toISOString(),
     phDate,
-    ...scored,
+    ...scoreHeadlines(headlines, place, now),
+    days: summarizeWeek(headlines, place, now),
   };
 }
 
-export async function getWeeklySummary(
+export function weeklyFromHeadlines(
+  headlines: Headline[],
   place: Place,
-  now = new Date(),
-  rssFallback?: RssFallback,
-): Promise<WeeklyResult> {
-  let headlines: Headline[];
-  try {
-    headlines = await loadRss(queryFor(place, "7d"), rssFallback);
-  } catch (error) {
-    console.error("Weekly news load failed", error);
-    return { ok: false, error: "could not load weekly news right now" };
-  }
-
+  now: Date,
+): WeeklyResult {
   return {
     ok: true,
     place,

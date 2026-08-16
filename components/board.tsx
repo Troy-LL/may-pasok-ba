@@ -296,41 +296,20 @@ export function Board({ initialPlaceId }: { initialPlaceId?: string }) {
     fetch(`/api/status?place=${encodeURIComponent(id)}`)
       .then(async (res) => {
         const body: unknown = await res.json();
-        if (!cancelled) setResult({ id, status: readStatus(body) });
+        if (cancelled) return;
+        setResult({ id, status: readStatus(body) });
+        setWeeklyResult({ id, status: readWeekly(body) });
       })
       .catch(() => {
-        if (!cancelled) {
-          setResult({
-            id,
-            status: { ok: false, error: "could not load news right now" },
-          });
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [place.id]);
-
-  useEffect(() => {
-    const id = place.id;
-    let cancelled = false;
-    fetch(`/api/history?place=${encodeURIComponent(id)}`)
-      .then(async (res) => {
-        const body: unknown = await res.json();
-        if (!cancelled) {
-          setWeeklyResult({ id, status: readWeekly(body) });
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setWeeklyResult({
-            id,
-            status: {
-              ok: false,
-              error: "could not load weekly news right now",
-            },
-          });
-        }
+        if (cancelled) return;
+        setResult({
+          id,
+          status: { ok: false, error: "could not load news right now" },
+        });
+        setWeeklyResult({
+          id,
+          status: { ok: false, error: "could not load weekly news right now" },
+        });
       });
     return () => {
       cancelled = true;
