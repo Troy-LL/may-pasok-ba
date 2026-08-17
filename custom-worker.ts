@@ -5,7 +5,6 @@ import {
   weeklyFromHeadlines,
 } from "./lib/news.ts";
 import {
-  WARM_PLACE_IDS,
   getPlace,
   matchGeo,
   resolvePlace,
@@ -90,17 +89,16 @@ function placeFor(request: Request): Place {
 }
 
 function headlinesFor(
-  place: Place,
   env: Env,
   ctx: ExecutionContext,
   now: Date,
 ): Promise<Headline[]> {
-  return inFlight(place.id, () =>
+  return inFlight("ncr", () =>
     cachedHeadlines(
       env.NEWS,
-      place.id,
+      "ncr",
       now,
-      () => fetchHeadlines(place, (rssUrl) => browserRss(env, rssUrl)),
+      () => fetchHeadlines((rssUrl) => browserRss(env, rssUrl)),
       { revalidate: (refresh) => ctx.waitUntil(refresh) },
     ),
   );
@@ -114,7 +112,7 @@ async function status(
   const place = placeFor(request);
   const now = new Date();
   try {
-    const headlines = await headlinesFor(place, env, ctx, now);
+    const headlines = await headlinesFor(env, ctx, now);
     return json(statusFromHeadlines(headlines, place, now), 200, 1200);
   } catch (error) {
     console.error("Current news load failed", error);
@@ -130,7 +128,7 @@ async function history(
   const place = placeFor(request);
   const now = new Date();
   try {
-    const headlines = await headlinesFor(place, env, ctx, now);
+    const headlines = await headlinesFor(env, ctx, now);
     return json(weeklyFromHeadlines(headlines, place, now), 200, 1200);
   } catch (error) {
     console.error("Weekly news load failed", error);
@@ -170,26 +168,16 @@ async function geo(request: Request): Promise<Response> {
 }
 
 async function warmNews(env: Env): Promise<string[]> {
-  const warmed: string[] = [];
   const browser = await puppeteer.launch(env.BROWSER);
   try {
-    for (const id of WARM_PLACE_IDS) {
-      const place = getPlace(id);
-      if (!place) continue;
-      try {
-        const headlines = await fetchHeadlines(place, (rssUrl) =>
-          browserPageRss(browser, rssUrl),
-        );
-        await putHeadlines(env.NEWS, id, headlines, new Date());
-        warmed.push(id);
-      } catch (error) {
-        console.error(`Warm failed for ${id}`, error);
-      }
-    }
+    const headlines = await fetchHeadlines((rssUrl) =>
+      browserPageRss(browser, rssUrl),
+    );
+    await putHeadlines(env.NEWS, "ncr", headlines, new Date());
+    return ["ncr"];
   } finally {
     await browser.close();
   }
-  return warmed;
 }
 
 async function api(
