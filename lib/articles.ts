@@ -228,68 +228,98 @@ async function fetchArticleBody(url: string): Promise<string | undefined> {
   }
 }
 
+export type ArticleResolver = (
+  url: string,
+) => Promise<{ url: string; html?: string } | undefined>;
+
 export async function enrichArticleBodies<T extends EnrichableHeadline>(
   headlines: T[],
+  resolver?: ArticleResolver,
 ): Promise<T[]> {
   const candidateIndexes = headlines
     .map((headline, index) => ({ headline, index }))
     .filter(
       ({ headline }) =>
+        !headline.body &&
         headline.link.includes("news.google.com/") &&
         BODY_SOURCES.test(headline.source ?? ""),
     )
     .slice(0, BODY_LIMIT);
   if (candidateIndexes.length === 0) return headlines;
 
-  const bySource = new Map<string, string>();
+  const bySource = new Map<string, { url: string; html?: string }>();
   for (const { headline } of candidateIndexes) {
     const cached = decodedUrlCache.get(headline.link);
-    if (cached) bySource.set(headline.link, cached);
+    if (cached) bySource.set(headline.link, { url: cached });
   }
 
   const unresolved = candidateIndexes
     .map(({ headline }) => headline.link)
     .filter((link) => !bySource.has(link));
   if (unresolved.length > 0) {
-    const decoder = new GoogleDecoder();
-    let cursor = 0;
-    const workers = Array.from(
-      { length: Math.min(3, unresolved.length) },
-      async () => {
-        while (cursor < unresolved.length) {
-          const link = unresolved[cursor++];
-          try {
-            const result = await Promise.race([
-              decoder.decode(link),
-              new Promise<undefined>((resolve) =>
-                setTimeout(() => resolve(undefined), 8000),
-              ),
-            ]);
-            if (
-              result?.status &&
-              typeof result.decoded_url === "string"
-            ) {
-              bySource.set(link, result.decoded_url);
-              cacheDecodedUrl(link, result.decoded_url);
-            }
-          } catch {
-            // Keep the Google link and continue with headline-only scoring.
+    if (resolver) {
+      for (const link of unresolved) {
+        try {
+          const res = await resolver(link);
+          if (res?.url && !res.url.includes("news.google.com")) {
+            bySource.set(link, res);
+            cacheDecodedUrl(link, res.url);
           }
+        } catch {
+          // Continue to fallback decoder
         }
-      },
-    );
-    await Promise.all(workers);
+      }
+    }
+
+    const stillUnresolved = unresolved.filter((link) => !bySource.has(link));
+    if (stillUnresolved.length > 0) {
+      const decoder = new GoogleDecoder();
+      let cursor = 0;
+      const workers = Array.from(
+        { length: Math.min(3, stillUnresolved.length) },
+        async () => {
+          while (cursor < stillUnresolved.length) {
+            const link = stillUnresolved[cursor++];
+            try {
+              const result = await Promise.race([
+                decoder.decode(link),
+                new Promise<undefined>((resolve) =>
+                  setTimeout(() => resolve(undefined), 8000),
+                ),
+              ]);
+              if (
+                result?.status &&
+                typeof result.decoded_url === "string" &&
+                !result.decoded_url.includes("news.google.com")
+              ) {
+                bySource.set(link, { url: result.decoded_url });
+                cacheDecodedUrl(link, result.decoded_url);
+              }
+            } catch {
+              // Keep the Google link and continue with headline-only scoring.
+            }
+          }
+        },
+      );
+      await Promise.all(workers);
+    }
   }
 
   const enriched = [...headlines];
   await Promise.all(
     candidateIndexes.map(async ({ headline, index }) => {
-      const decodedUrl = bySource.get(headline.link);
-      if (!decodedUrl) return;
-      const body = await fetchArticleBody(decodedUrl);
+      const resolved = bySource.get(headline.link);
+      if (!resolved) return;
+      let body: string | undefined;
+      if (resolved.html) {
+        body = extractArticleBody(resolved.url, resolved.html);
+      }
+      if (!body) {
+        body = await fetchArticleBody(resolved.url);
+      }
       enriched[index] = {
         ...headline,
-        link: decodedUrl,
+        link: resolved.url,
         ...(body ? { body } : {}),
       };
     }),

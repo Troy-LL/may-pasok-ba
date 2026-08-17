@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { bodyMentionsPlace, extractArticleBody } from "./articles.ts";
+import {
+  bodyMentionsPlace,
+  enrichArticleBodies,
+  extractArticleBody,
+} from "./articles.ts";
 import type { Place } from "./places.ts";
 
 const manila: Place = {
@@ -84,4 +88,23 @@ test("an explicit NCR-wide suspension applies to every NCR place", () => {
   assert.equal(bodyMentionsPlace(body, manila), true);
   assert.equal(bodyMentionsPlace(body, caloocan), true);
   assert.equal(bodyMentionsPlace(body, ncr), true);
+});
+
+test("enrichArticleBodies uses custom resolver to resolve link and body", async () => {
+  const headlines = [
+    {
+      title: "WALANG PASOK: Class suspensions for August 17",
+      link: "https://news.google.com/rss/articles/CBMi123",
+      source: "GMA Network",
+      publishedAt: new Date("2026-08-17T01:00:00Z"),
+    },
+  ];
+  const enriched = await enrichArticleBodies(headlines, async () => {
+    return {
+      url: "https://www.gmanetwork.com/news/story/123",
+      html: `<script type="application/ld+json">{"@type":"NewsArticle","articleBody":"Quezon City - all levels suspended"}</script>`,
+    };
+  });
+  assert.equal(enriched[0]?.link, "https://www.gmanetwork.com/news/story/123");
+  assert.match(enriched[0]?.body ?? "", /Quezon City - all levels/);
 });

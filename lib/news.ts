@@ -9,11 +9,12 @@ import {
 import {
   bodyEvidenceForPlace,
   enrichArticleBodies,
+  type ArticleResolver,
 } from "./articles.ts";
 import type { Place } from "./places.ts";
 import { parseRss, type Headline } from "./rss.ts";
 
-export type { Headline };
+export type { Headline, ArticleResolver };
 export type Confidence = "none" | "reported" | "confirmed";
 export type HeadlineHit = Omit<Headline, "body"> & { kinds: Kind[] };
 export type RssFallback = (url: string) => Promise<string>;
@@ -94,9 +95,14 @@ export function mergeHeadlines(headlineLists: Headline[][]): Headline[] {
       const existing = byLink.get(h.link);
       if (
         !existing ||
-        h.publishedAt.getTime() > existing.publishedAt.getTime()
+        h.publishedAt.getTime() > existing.publishedAt.getTime() ||
+        (!existing.body && h.body)
       ) {
-        byLink.set(h.link, h);
+        byLink.set(h.link, {
+          ...existing,
+          ...h,
+          body: h.body ?? existing?.body,
+        });
       }
     }
   }
@@ -189,6 +195,7 @@ async function loadRssQuery(
 export async function fetchHeadlines(
   rssFallback?: RssFallback,
   queries = NEWS_QUERIES,
+  articleResolver?: ArticleResolver,
 ): Promise<Headline[]> {
   const lists: Headline[][] = [];
   for (const query of queries) {
@@ -201,7 +208,7 @@ export async function fetchHeadlines(
   if (lists.length === 0) {
     throw new Error("could not load news right now");
   }
-  return enrichArticleBodies(mergeHeadlines(lists));
+  return enrichArticleBodies(mergeHeadlines(lists), articleResolver);
 }
 
 function confidenceFromCount(count: number): Confidence {
