@@ -6,6 +6,7 @@ import {
   decodeHeadlines,
   encodeHeadlines,
   newsKey,
+  preserveHeadlineBodies,
   singleFlight,
   type HeadlineStore,
 } from "./store.ts";
@@ -141,6 +142,62 @@ test("a failed load with no cache entry rejects", async () => {
     }),
     /news 503/,
   );
+});
+
+test("preserveHeadlineBodies retains article bodies from existing cache", () => {
+  const existing: Headline[] = [
+    {
+      title: "WALANG PASOK: Class suspensions",
+      link: "https://example.com/story1",
+      source: "Rappler",
+      publishedAt: new Date("2026-08-17T01:00:00Z"),
+      body: "Caloocan - all levels suspended",
+    },
+  ];
+  const freshWithoutBody: Headline[] = [
+    {
+      title: "WALANG PASOK: Class suspensions",
+      link: "https://example.com/story1",
+      source: "Rappler",
+      publishedAt: new Date("2026-08-17T01:00:00Z"),
+    },
+  ];
+  const merged = preserveHeadlineBodies(freshWithoutBody, existing);
+  assert.equal(merged[0]?.body, "Caloocan - all levels suspended");
+});
+
+test("stale entries preserve extracted bodies when refreshed in background", async () => {
+  const now = new Date("2026-08-17T05:00:00Z");
+  const cachedItem: Headline = {
+    title: "WALANG PASOK: Class suspensions",
+    link: "https://example.com/story1",
+    source: "Rappler",
+    publishedAt: new Date("2026-08-17T01:00:00Z"),
+    body: "Caloocan - all levels suspended",
+  };
+  const { store, data } = memoryStore({
+    [newsKey("ncr")]: encodeHeadlines([cachedItem], new Date("2026-08-17T04:00:00Z")),
+  });
+
+  const background: Promise<unknown>[] = [];
+  const freshWithoutBody: Headline = {
+    title: "WALANG PASOK: Class suspensions",
+    link: "https://example.com/story1",
+    source: "Rappler",
+    publishedAt: new Date("2026-08-17T01:00:00Z"),
+  };
+
+  await cachedHeadlines(
+    store,
+    "ncr",
+    now,
+    async () => [freshWithoutBody],
+    { revalidate: (promise) => background.push(promise) },
+  );
+
+  await Promise.all(background);
+  const updated = decodeHeadlines(data.get(newsKey("ncr")) ?? null);
+  assert.equal(updated?.headlines[0]?.body, "Caloocan - all levels suspended");
 });
 
 test("single flight shares one load between concurrent callers", async () => {

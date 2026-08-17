@@ -3,6 +3,7 @@ import {
   fetchHeadlines,
   statusFromHeadlines,
   weeklyFromHeadlines,
+  NEWS_QUERIES,
 } from "./lib/news.ts";
 import {
   getPlace,
@@ -35,7 +36,7 @@ function json(value: unknown, status = 200, maxAge = 0): Response {
     status,
     headers: maxAge
       ? { "cache-control": `public, max-age=0, s-maxage=${maxAge}` }
-      : undefined,
+      : { "cache-control": "no-cache, no-store, must-revalidate" },
   });
 }
 
@@ -72,10 +73,43 @@ async function browserPageRss(browser: Browser, url: string): Promise<string> {
   }
 }
 
-async function browserRss(env: Env, url: string): Promise<string> {
+async function fetchHeadlinesWithBrowser(env: Env): Promise<Headline[]> {
   const browser = await puppeteer.launch(env.BROWSER);
   try {
-    return await browserPageRss(browser, url);
+    return await fetchHeadlines(
+      (rssUrl) => browserPageRss(browser, rssUrl),
+      NEWS_QUERIES,
+      async (googleUrl) => {
+        const page = await browser.newPage();
+        try {
+          await page.goto(googleUrl, {
+            waitUntil: "load",
+            timeout: 15_000,
+          });
+          let url = page.url();
+          if (url.includes("news.google.com")) {
+            try {
+              await page.waitForFunction(
+                () => !window.location.hostname.includes("news.google.com"),
+                { timeout: 5000 },
+              );
+              url = page.url();
+            } catch {
+              // Redirect did not trigger within 5s
+            }
+          }
+          if (!url.includes("news.google.com")) {
+            const html = await page.content();
+            return { url, html };
+          }
+          return undefined;
+        } catch {
+          return undefined;
+        } finally {
+          await page.close();
+        }
+      },
+    );
   } finally {
     await browser.close();
   }
@@ -98,7 +132,7 @@ function headlinesFor(
       env.NEWS,
       "ncr",
       now,
-      () => fetchHeadlines((rssUrl) => browserRss(env, rssUrl)),
+      () => fetchHeadlinesWithBrowser(env),
       { revalidate: (refresh) => ctx.waitUntil(refresh) },
     ),
   );
@@ -113,7 +147,7 @@ async function status(
   const now = new Date();
   try {
     const headlines = await headlinesFor(env, ctx, now);
-    return json(statusFromHeadlines(headlines, place, now), 200, 1200);
+    return json(statusFromHeadlines(headlines, place, now), 200);
   } catch (error) {
     console.error("Current news load failed", error);
     return json({ ok: false, error: "could not load news right now" }, 502);
@@ -129,7 +163,7 @@ async function history(
   const now = new Date();
   try {
     const headlines = await headlinesFor(env, ctx, now);
-    return json(weeklyFromHeadlines(headlines, place, now), 200, 1200);
+    return json(weeklyFromHeadlines(headlines, place, now), 200);
   } catch (error) {
     console.error("Weekly news load failed", error);
     return json(
@@ -168,16 +202,9 @@ async function geo(request: Request): Promise<Response> {
 }
 
 async function warmNews(env: Env): Promise<string[]> {
-  const browser = await puppeteer.launch(env.BROWSER);
-  try {
-    const headlines = await fetchHeadlines((rssUrl) =>
-      browserPageRss(browser, rssUrl),
-    );
-    await putHeadlines(env.NEWS, "ncr", headlines, new Date());
-    return ["ncr"];
-  } finally {
-    await browser.close();
-  }
+  const headlines = await fetchHeadlinesWithBrowser(env);
+  await putHeadlines(env.NEWS, "ncr", headlines, new Date());
+  return ["ncr"];
 }
 
 async function api(
@@ -189,10 +216,10 @@ async function api(
   if (request.method !== "GET") return json({ ok: false }, 405);
 
   if (url.pathname === "/api/status") {
-    return cached(request, ctx, 1200, () => status(request, env, ctx));
+    return status(request, env, ctx);
   }
   if (url.pathname === "/api/history") {
-    return cached(request, ctx, 1200, () => history(request, env, ctx));
+    return history(request, env, ctx);
   }
   if (url.pathname === "/api/geo") {
     return cached(request, ctx, 86400, () => geo(request));

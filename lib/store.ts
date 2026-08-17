@@ -95,6 +95,25 @@ export type CacheOptions = {
   revalidate?: (refresh: Promise<unknown>) => void;
 };
 
+export function preserveHeadlineBodies(
+  fresh: Headline[],
+  existing: Headline[],
+): Headline[] {
+  const bodiesByLinkOrTitle = new Map<string, string>();
+  for (const h of existing) {
+    if (h.body) {
+      bodiesByLinkOrTitle.set(h.link, h.body);
+      bodiesByLinkOrTitle.set(h.title, h.body);
+    }
+  }
+  return fresh.map((h) => {
+    if (h.body) return h;
+    const body =
+      bodiesByLinkOrTitle.get(h.link) ?? bodiesByLinkOrTitle.get(h.title);
+    return body ? { ...h, body } : h;
+  });
+}
+
 export async function cachedHeadlines(
   store: HeadlineStore,
   placeId: string,
@@ -110,7 +129,10 @@ export async function cachedHeadlines(
   if (entry && revalidate) {
     revalidate(
       load()
-        .then((headlines) => putHeadlines(store, placeId, headlines, now))
+        .then((headlines) => {
+          const preserved = preserveHeadlineBodies(headlines, entry.headlines);
+          return putHeadlines(store, placeId, preserved, now);
+        })
         .catch((error: unknown) => {
           console.error("Background news refresh failed", error);
         }),
@@ -120,8 +142,11 @@ export async function cachedHeadlines(
 
   try {
     const headlines = await load();
-    await putHeadlines(store, placeId, headlines, now);
-    return headlines;
+    const preserved = entry
+      ? preserveHeadlineBodies(headlines, entry.headlines)
+      : headlines;
+    await putHeadlines(store, placeId, preserved, now);
+    return preserved;
   } catch (error) {
     if (!entry) throw error;
     console.error("News refresh failed, serving cached headlines", error);
