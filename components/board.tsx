@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import appIcon from "@/app/icon.png";
@@ -238,6 +238,11 @@ export function Board({ initialPlaceId }: { initialPlaceId?: string }) {
     resolvePlace(initialPlaceId ?? "Quezon City");
   const [typed, setTyped] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
+  const [highlightedIndex, setHighlightedIndex] = useState<number>(-1);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLUListElement>(null);
+
   const query = typed ?? labelOf(place);
   const suggestions = useMemo(() => filterPlaces(typed ?? ""), [typed]);
   const [result, setResult] = useState<{
@@ -254,8 +259,92 @@ export function Board({ initialPlaceId }: { initialPlaceId?: string }) {
   function applyPlace(next: Place) {
     window.localStorage.setItem("wala-meron-place", next.id);
     setTyped(null);
+    setOpen(false);
+    setHighlightedIndex(-1);
     setLocNote(null);
     router.replace(`/?place=${encodeURIComponent(next.id)}`);
+  }
+
+  // Scroll highlighted item into view on keyboard navigation
+  useEffect(() => {
+    if (open && highlightedIndex >= 0 && listRef.current) {
+      const item = listRef.current.children[highlightedIndex] as
+        | HTMLElement
+        | undefined;
+      item?.scrollIntoView({ block: "nearest" });
+    }
+  }, [open, highlightedIndex]);
+
+  // Click outside to cleanly close without accidental submission
+  useEffect(() => {
+    function handlePointerDown(e: MouseEvent | TouchEvent) {
+      if (
+        containerRef.current &&
+        !containerRef.current.contains(e.target as Node)
+      ) {
+        setOpen(false);
+        setTyped(null);
+        setHighlightedIndex(-1);
+      }
+    }
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("touchstart", handlePointerDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("touchstart", handlePointerDown);
+    };
+  }, []);
+
+  function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      if (!open) {
+        setOpen(true);
+        const currentIndex = suggestions.findIndex((p) => p.id === place.id);
+        setHighlightedIndex(currentIndex >= 0 ? currentIndex : 0);
+      } else if (suggestions.length > 0) {
+        setHighlightedIndex((prev) => (prev + 1) % suggestions.length);
+      }
+      return;
+    }
+    if (e.key === "ArrowUp") {
+      e.preventDefault();
+      if (!open) {
+        setOpen(true);
+        const currentIndex = suggestions.findIndex((p) => p.id === place.id);
+        setHighlightedIndex(
+          currentIndex >= 0 ? currentIndex : suggestions.length - 1,
+        );
+      } else if (suggestions.length > 0) {
+        setHighlightedIndex((prev) =>
+          prev <= 0 ? suggestions.length - 1 : prev - 1,
+        );
+      }
+      return;
+    }
+    if (e.key === "Enter") {
+      e.preventDefault();
+      if (open && highlightedIndex >= 0 && suggestions[highlightedIndex]) {
+        applyPlace(suggestions[highlightedIndex]);
+      } else {
+        applyPlace(resolvePlace(query));
+      }
+      inputRef.current?.blur();
+      return;
+    }
+    if (e.key === "Escape") {
+      e.preventDefault();
+      setTyped(null);
+      setOpen(false);
+      setHighlightedIndex(-1);
+      inputRef.current?.blur();
+      return;
+    }
+    if (e.key === "Tab") {
+      setOpen(false);
+      setTyped(null);
+      setHighlightedIndex(-1);
+    }
   }
 
   useEffect(() => {
@@ -293,7 +382,7 @@ export function Board({ initialPlaceId }: { initialPlaceId?: string }) {
   useEffect(() => {
     const id = place.id;
     let cancelled = false;
-    fetch(`/api/status?place=${encodeURIComponent(id)}`)
+    fetch(`/api/status?place=${encodeURIComponent(id)}`, { cache: "no-store" })
       .then(async (res) => {
         const body: unknown = await res.json();
         if (cancelled) return;
@@ -369,66 +458,182 @@ export function Board({ initialPlaceId }: { initialPlaceId?: string }) {
           May Pasok Ba?
         </h1>
         <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-end">
-          <label className="relative block min-w-0 flex-1">
-            <span className="sr-only">Lungsod o bayan</span>
-            <input
-              role="combobox"
-              aria-expanded={open}
-              aria-controls="place-list"
-              aria-autocomplete="list"
-              autoComplete="off"
-              value={query}
-              onChange={(e) => {
-                setTyped(e.target.value);
-                setOpen(true);
-              }}
-              onFocus={(e) => {
-                e.currentTarget.select();
-                setOpen(true);
-              }}
-              onBlur={() => {
-                setOpen(false);
-                if (typed !== null) applyPlace(resolvePlace(typed));
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Escape") {
-                  setTyped(null);
-                  setOpen(false);
-                  return;
+          <div ref={containerRef} className="relative min-w-0 flex-1">
+            <div className="flex items-center justify-between border-b-2 border-ink pb-1 focus-within:border-red transition-colors">
+              <label htmlFor="place-combobox" className="sr-only">
+                Lungsod o bayan
+              </label>
+              <input
+                id="place-combobox"
+                ref={inputRef}
+                role="combobox"
+                aria-expanded={open}
+                aria-controls="place-list"
+                aria-autocomplete="list"
+                aria-activedescendant={
+                  highlightedIndex >= 0 && suggestions[highlightedIndex]
+                    ? `place-option-${suggestions[highlightedIndex].id}`
+                    : undefined
                 }
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  setOpen(false);
-                  applyPlace(resolvePlace(query));
-                }
-              }}
-              placeholder="Metro Manila, NCR"
-              className="w-full border-b-2 border-ink bg-transparent pb-2 text-2xl font-medium tracking-tight outline-none placeholder:text-ink/30 focus:border-red"
-            />
-            {open ? (
-              <ul
-                id="place-list"
-                role="listbox"
-                className="absolute z-10 mt-1 max-h-64 w-full overflow-auto border-2 border-ink bg-paper"
-              >
-                {suggestions.map((p) => (
-                  <li key={p.id} role="option" aria-selected={false}>
-                    <button
-                      type="button"
-                      className="w-full px-3 py-2 text-left text-base hover:bg-ink hover:text-paper"
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => {
-                        setOpen(false);
-                        applyPlace(p);
-                      }}
-                    >
-                      {labelOf(p)}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-          </label>
+                autoComplete="off"
+                value={query}
+                onChange={(e) => {
+                  setTyped(e.target.value);
+                  setOpen(true);
+                  setHighlightedIndex(0);
+                }}
+                onFocus={(e) => {
+                  e.currentTarget.select();
+                  setOpen(true);
+                  const currentIndex = suggestions.findIndex(
+                    (p) => p.id === place.id,
+                  );
+                  setHighlightedIndex(currentIndex >= 0 ? currentIndex : 0);
+                }}
+                onClick={() => {
+                  if (!open) {
+                    setOpen(true);
+                    inputRef.current?.select();
+                  }
+                }}
+                onKeyDown={handleKeyDown}
+                placeholder="Metro Manila, NCR"
+                className="w-full bg-transparent text-2xl font-medium tracking-tight outline-none placeholder:text-ink/30 cursor-pointer focus:cursor-text"
+              />
+              <div className="flex items-center gap-1 pl-2">
+                {typed !== null && typed !== "" && (
+                  <button
+                    type="button"
+                    aria-label="Burahin ang paghahanap"
+                    className="flex h-7 w-7 items-center justify-center rounded-full text-ink/40 hover:bg-ink/10 hover:text-ink transition-colors"
+                    onClick={() => {
+                      setTyped("");
+                      setOpen(true);
+                      setHighlightedIndex(0);
+                      inputRef.current?.focus();
+                    }}
+                  >
+                    <span className="text-base leading-none">✕</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  aria-label={
+                    open
+                      ? "Isara ang listahan"
+                      : "Buksan ang listahan ng mga lungsod"
+                  }
+                  tabIndex={-1}
+                  className="flex h-7 w-7 items-center justify-center text-ink/60 hover:text-ink transition-transform"
+                  onClick={() => {
+                    if (open) {
+                      setOpen(false);
+                      setTyped(null);
+                    } else {
+                      setOpen(true);
+                      inputRef.current?.focus();
+                      inputRef.current?.select();
+                    }
+                  }}
+                >
+                  <svg
+                    className={`h-4 w-4 transition-transform duration-200 ${
+                      open ? "rotate-180" : ""
+                    }`}
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.5"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M19 9l-7 7-7-7"
+                    />
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            {open && (
+              <div className="absolute left-0 right-0 top-full z-30 mt-1 max-h-72 overflow-hidden border-2 border-ink bg-paper shadow-lg">
+                <ul
+                  id="place-list"
+                  ref={listRef}
+                  role="listbox"
+                  className="max-h-72 overflow-y-auto divide-y divide-ink/10"
+                >
+                  {suggestions.length > 0 ? (
+                    suggestions.map((p, index) => {
+                      const isSelected = p.id === place.id;
+                      const isHighlighted = index === highlightedIndex;
+                      return (
+                        <li
+                          key={p.id}
+                          id={`place-option-${p.id}`}
+                          role="option"
+                          aria-selected={isSelected}
+                        >
+                          <button
+                            type="button"
+                            className={`flex w-full items-center justify-between px-3.5 py-2.5 text-left text-base transition-colors ${
+                              isHighlighted
+                                ? "bg-ink text-paper"
+                                : isSelected
+                                  ? "bg-ink/5 font-semibold text-ink"
+                                  : "text-ink hover:bg-ink/10"
+                            }`}
+                            onMouseEnter={() => setHighlightedIndex(index)}
+                            onClick={() => applyPlace(p)}
+                          >
+                            <div className="flex flex-col">
+                              <span className="font-medium">{p.name}</span>
+                              <span
+                                className={`text-xs ${
+                                  isHighlighted
+                                    ? "text-paper/70"
+                                    : "text-ink/60"
+                                }`}
+                              >
+                                {p.province === "NCR"
+                                  ? "Rehiyon (Pangkalahatan)"
+                                  : p.province}
+                              </span>
+                            </div>
+                            {isSelected && (
+                              <span
+                                className={`text-sm font-bold ${
+                                  isHighlighted ? "text-paper" : "text-green"
+                                }`}
+                                aria-label="Kasalukuyang napili"
+                              >
+                                ✓
+                              </span>
+                            )}
+                          </button>
+                        </li>
+                      );
+                    })
+                  ) : (
+                    <li className="px-4 py-5 text-center text-sm text-ink/70">
+                      <p>Walang nahanap na lungsod sa NCR.</p>
+                      <button
+                        type="button"
+                        className="mt-2 inline-block border border-ink px-3 py-1 text-xs font-medium hover:bg-ink hover:text-paper"
+                        onClick={() => {
+                          setTyped("");
+                          setHighlightedIndex(0);
+                          inputRef.current?.focus();
+                        }}
+                      >
+                        Ipakita ang lahat ng mga lungsod
+                      </button>
+                    </li>
+                  )}
+                </ul>
+              </div>
+            )}
+          </div>
           <button
             type="button"
             onClick={() => void locate()}
