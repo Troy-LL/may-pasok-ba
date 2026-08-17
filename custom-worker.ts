@@ -12,6 +12,12 @@ import {
 } from "./lib/places.ts";
 import { isCronAuthorized } from "./lib/cron.ts";
 import { cachedHeadlines, putHeadlines, singleFlight } from "./lib/store.ts";
+import {
+  applySecurityHeaders,
+  corsPreflightResponse,
+  isValidCoordinate,
+  sanitizeQuery,
+} from "./lib/security.ts";
 import type { Headline } from "./lib/rss.ts";
 import type { Place } from "./lib/places.ts";
 
@@ -118,7 +124,8 @@ async function fetchHeadlinesWithBrowser(env: Env): Promise<Headline[]> {
 const inFlight = singleFlight<Headline[]>();
 
 function placeFor(request: Request): Place {
-  const q = new URL(request.url).searchParams.get("place") ?? "";
+  const rawQuery = new URL(request.url).searchParams.get("place") ?? "";
+  const q = sanitizeQuery(rawQuery);
   return getPlace(q) ?? resolvePlace(q);
 }
 
@@ -177,10 +184,15 @@ async function geo(request: Request): Promise<Response> {
   const url = new URL(request.url);
   const lat = url.searchParams.get("lat");
   const lon = url.searchParams.get("lon");
-  if (!lat || !lon) return json({ ok: false, error: "need lat and lon" }, 400);
+  if (!isValidCoordinate(lat, lon)) {
+    return json(
+      { ok: false, error: "need valid lat and lon coordinates" },
+      400,
+    );
+  }
 
   const response = await fetch(
-    `https://nominatim.openstreetmap.org/reverse?lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}&format=jsonv2&zoom=14`,
+    `https://nominatim.openstreetmap.org/reverse?lat=${encodeURIComponent(lat!)}&lon=${encodeURIComponent(lon!)}&format=jsonv2&zoom=14`,
     {
       headers: {
         "User-Agent": "MayPasokBa/1.0 (personal class-suspension checker)",
@@ -212,8 +224,12 @@ async function api(
   env: Env,
   ctx: ExecutionContext,
 ): Promise<Response> {
-  const url = new URL(request.url);
+  if (request.method === "OPTIONS") {
+    return corsPreflightResponse();
+  }
   if (request.method !== "GET") return json({ ok: false }, 405);
+
+  const url = new URL(request.url);
 
   if (url.pathname === "/api/status") {
     return status(request, env, ctx);
@@ -243,10 +259,11 @@ async function api(
 
 export default {
   async fetch(request, env, ctx) {
-    if (new URL(request.url).pathname.startsWith("/api/")) {
-      return api(request, env, ctx);
-    }
-    return env.ASSETS.fetch(request);
+    const isApi = new URL(request.url).pathname.startsWith("/api/");
+    const response = isApi
+      ? await api(request, env, ctx)
+      : await env.ASSETS.fetch(request);
+    return applySecurityHeaders(response, isApi);
   },
 
   async scheduled(_event, env, ctx) {

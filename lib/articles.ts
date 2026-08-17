@@ -13,7 +13,11 @@ const SUPPORTED_HOSTS = [
 
 export function supportsArticleBody(url: string): boolean {
   try {
-    const host = new URL(url).hostname.replace(/^www\./, "");
+    const parsed = new URL(url);
+    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+      return false;
+    }
+    const host = parsed.hostname.replace(/^www\./, "");
     return SUPPORTED_HOSTS.some(
       (supported) => host === supported || host.endsWith(`.${supported}`),
     );

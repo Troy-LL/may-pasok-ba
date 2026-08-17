@@ -14,6 +14,7 @@ import {
   resolvePlace,
   type Place,
 } from "@/lib/places";
+import { sanitizeUrl } from "@/lib/security";
 
 type HeadlineHit = { title: string; link: string; source: string };
 type StatusResult =
@@ -713,19 +714,26 @@ export function Board({ initialPlaceId }: { initialPlaceId?: string }) {
             <summary className="cursor-pointer select-none">why?</summary>
             {status.headlines.length > 0 ? (
               <ul className="mt-3 space-y-2">
-                {status.headlines.map((h) => (
-                  <li key={h.link || h.title}>
-                    <a
-                      href={h.link}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="underline decoration-ink/30 hover:decoration-ink"
-                    >
-                      {h.title}
-                    </a>
-                    {h.source ? <span> · {h.source}</span> : null}
-                  </li>
-                ))}
+                {status.headlines.map((h) => {
+                  const safeLink = sanitizeUrl(h.link);
+                  return (
+                    <li key={h.link || h.title}>
+                      {safeLink ? (
+                        <a
+                          href={safeLink}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="underline decoration-ink/30 hover:decoration-ink"
+                        >
+                          {h.title}
+                        </a>
+                      ) : (
+                        <span>{h.title}</span>
+                      )}
+                      {h.source ? <span> · {h.source}</span> : null}
+                    </li>
+                  );
+                })}
               </ul>
             ) : (
               <p className="mt-3">
