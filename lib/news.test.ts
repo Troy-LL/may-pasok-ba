@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { Place } from "./places.ts";
 import {
+  mergeHeadlines,
+  NEWS_QUERIES,
   parseRss2Json,
   scoreHeadlines,
   statusFromHeadlines,
@@ -225,3 +227,38 @@ test("article body can place a generic roundup without leaking other-place kinds
   assert.equal(scored.verdicts.government, "MERON");
   assert.equal(scored.headlines[0].body, undefined);
 });
+
+test("NEWS_QUERIES contains keyword-split 7d queries", () => {
+  assert.ok(NEWS_QUERIES.length >= 2);
+  for (const q of NEWS_QUERIES) {
+    assert.match(q, /when:7d/);
+  }
+});
+
+test("mergeHeadlines deduplicates by link and sorts newest first", () => {
+  const h1 = headline(
+    "Walang pasok in Quezon City",
+    "ABS-CBN",
+    "2026-08-13T10:00:00Z",
+  );
+  const h2 = {
+    ...headline(
+      "Walang pasok in Quezon City - updated",
+      "ABS-CBN",
+      "2026-08-13T11:00:00Z",
+    ),
+    link: h1.link, // same link
+  };
+  const h3 = headline(
+    "Classes suspended in Manila",
+    "GMA Network",
+    "2026-08-13T12:00:00Z",
+  );
+
+  const merged = mergeHeadlines([[h1], [h2, h3]]);
+  assert.equal(merged.length, 2);
+  assert.equal(merged[0].link, h3.link);
+  assert.equal(merged[0].title, "Classes suspended in Manila");
+  assert.equal(merged[1].link, h1.link);
+});
+

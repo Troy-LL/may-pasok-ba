@@ -81,10 +81,28 @@ function newsUrl(query: string): string {
   return `https://news.google.com/rss/search?q=${q}&hl=en-PH&gl=PH&ceid=PH:en`;
 }
 
-function queryFor(place: Place, window = "2d"): string {
-  const names = [`"${place.name}"`, ...place.aliases.slice(0, 2).map((a) => `"${a}"`)];
-  if (place.ncr) names.push('"Metro Manila"', "NCR");
-  return `(${names.join(" OR ")}) ("walang pasok" OR "class suspension" OR "classes suspended" OR "work suspension" OR "government offices" OR suspendido OR "no classes" OR "no work") when:${window}`;
+export const NEWS_QUERIES = [
+  '("walang pasok" OR "walangpasok" OR suspendido OR suspensiyon OR kanselado) when:7d',
+  '("class suspension" OR "classes suspended" OR "suspension of classes" OR "no classes" OR "cancelled classes") when:7d',
+  '("work suspension" OR "work suspended" OR "suspension of work" OR "government offices" OR "no work") when:7d',
+];
+
+export function mergeHeadlines(headlineLists: Headline[][]): Headline[] {
+  const byLink = new Map<string, Headline>();
+  for (const list of headlineLists) {
+    for (const h of list) {
+      const existing = byLink.get(h.link);
+      if (
+        !existing ||
+        h.publishedAt.getTime() > existing.publishedAt.getTime()
+      ) {
+        byLink.set(h.link, h);
+      }
+    }
+  }
+  return Array.from(byLink.values()).sort(
+    (a, b) => b.publishedAt.getTime() - a.publishedAt.getTime(),
+  );
 }
 
 export function parseRss2Json(value: unknown): Headline[] {
@@ -129,7 +147,7 @@ function relevantHeadlines(headlines: Headline[]): Headline[] {
   });
 }
 
-async function loadRss(
+async function loadRssQuery(
   query: string,
   browserFallback?: RssFallback,
 ): Promise<Headline[]> {
@@ -143,7 +161,7 @@ async function loadRss(
     },
   });
   if (res.ok) {
-    return enrichArticleBodies(relevantHeadlines(parseRss(await res.text())));
+    return relevantHeadlines(parseRss(await res.text()));
   }
   await res.body?.cancel();
 
@@ -166,6 +184,24 @@ async function loadRss(
     throw new Error(`news ${res.status}; fallback ${fallback.status}`);
   }
   return relevantHeadlines(parseRss2Json(await fallback.json()));
+}
+
+export async function fetchHeadlines(
+  rssFallback?: RssFallback,
+  queries = NEWS_QUERIES,
+): Promise<Headline[]> {
+  const lists: Headline[][] = [];
+  for (const query of queries) {
+    try {
+      lists.push(await loadRssQuery(query, rssFallback));
+    } catch (error) {
+      console.error(`Failed loading query "${query}":`, error);
+    }
+  }
+  if (lists.length === 0) {
+    throw new Error("could not load news right now");
+  }
+  return enrichArticleBodies(mergeHeadlines(lists));
 }
 
 function confidenceFromCount(count: number): Confidence {
@@ -314,13 +350,6 @@ export function summarizeWeek(
       ),
     };
   });
-}
-
-export function fetchHeadlines(
-  place: Place,
-  rssFallback?: RssFallback,
-): Promise<Headline[]> {
-  return loadRss(queryFor(place, "7d"), rssFallback);
 }
 
 export function statusFromHeadlines(
