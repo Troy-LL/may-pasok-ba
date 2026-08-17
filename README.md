@@ -2,9 +2,9 @@
 
 The page answers **WALA** or **MERON** for classes, work, and government offices in a Philippine city or municipality.
 
-It reads public Google News RSS, then scores only **allowlisted Philippine outlets** (GMA, Inquirer, Rappler, Philstar, SunStar, ABS-CBN, Manila Bulletin, and similar). Random blogs are ignored. For the first 10 relevant results, it resolves the publisher link and reads the article body from GMA, ABS-CBN, Manila Bulletin, Rappler, and Philstar using source-specific extractors.
+It reads public Google News RSS via a shared headline pool built from keyword-split queries, then scores only **allowlisted Philippine outlets** (GMA, Inquirer, Rappler, Philstar, SunStar, ABS-CBN, Manila Bulletin, and similar). Random blogs are ignored. For the first 10 relevant results, it resolves the publisher link and reads the article body from GMA, ABS-CBN, Manila Bulletin, Rappler, and Philstar using source-specific extractors.
 
-Cloudflare first requests the feed directly. Because Google can reject data-center IPs with HTTP 503, production falls back to Cloudflare Browser Rendering, then RSS2JSON as a last resort; fallback results are headline-only.
+Cloudflare first requests the feed directly. Because Google can reject data-center IPs with HTTP 503, production falls back to Cloudflare Browser Rendering, then RSS2JSON as a last resort; fallback results are headline-only. Headlines are cached in Cloudflare Workers KV with stale-while-revalidate and per-colo edge caching.
 
 Not an official LGU or DepEd feed. It does not scrape Facebook. If the mayor posted only on Facebook, this can still be wrong. Check the **why?** links.
 
@@ -24,7 +24,7 @@ Type an NCR city or municipality, **Metro Manila** / NCR, or use the browser loc
 
 ## Daily 5:00 AM check
 
-On Cloudflare Workers, a Cron Trigger runs at **21:00 UTC** (5:00 AM in Manila) and warms NCR places. Requests are cached at the edge for 20 minutes.
+On Cloudflare Workers, a Cron Trigger runs at **21:00 UTC** (5:00 AM in Manila) and warms the shared NCR news pool in Workers KV. Requests are cached in KV for 7 days with background revalidation and at the edge for 20 minutes.
 
 `CRON_SECRET` protects manual calls to `/api/cron`; the native Cron Trigger does not need it.
 

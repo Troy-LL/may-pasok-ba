@@ -20,12 +20,13 @@ This file + at most 2. Skip unused.
 
 - Run, cron secret, deploy: `README.md`
 - Verdict rules (WALA/MERON, kinds, freshness): `lib/classify.ts`
-- RSS query, allowlist, Browser Rendering fallback, `scoreHeadlines`: `lib/news.ts`
+- Shared RSS queries, allowlist, Browser Rendering fallback, `scoreHeadlines`: `lib/news.ts`
+- KV headline cache, encoding, stale-while-revalidate, single-flight: `lib/store.ts`
 - Google link resolution, publisher body extractors, locality snippets: `lib/articles.ts`
 - LGU list, picker, Nominatim match: `lib/places.ts`
 - Board UI: `components/board.tsx`
-- Static assets, JSON APIs, edge cache, daily warm, geocode: `custom-worker.ts`
-- Cloudflare domain, Browser Rendering binding, cron: `wrangler.jsonc`
+- Static assets, JSON APIs, KV & edge cache, daily warm, geocode: `custom-worker.ts`
+- Cloudflare domain, KV namespace, Browser Rendering binding, cron: `wrangler.jsonc`
 
 ## Commands
 
