@@ -1,5 +1,6 @@
 import decoderModule from "google-news-url-decoder";
 import { fold, hasPhrase } from "./classify.ts";
+import { addCalendarDays, manilaYmd, parseCoverageDates } from "./dates.ts";
 import type { Place } from "./places.ts";
 
 const { GoogleDecoder } = decoderModule;
@@ -211,6 +212,14 @@ export function bodyMentionsPlace(body: string, place: Place): boolean {
   return bodyEvidenceForPlace(body, place) !== undefined;
 }
 
+type EnrichableHeadline = {
+  link: string;
+  source?: string;
+  body?: string;
+  title?: string;
+  publishedAt?: Date;
+};
+
 function needsArticleBody(headline: EnrichableHeadline): boolean {
   if (headline.body) return false;
   if (typeof headline.link !== "string") return false;
@@ -223,16 +232,27 @@ function needsArticleBody(headline: EnrichableHeadline): boolean {
 
 export function needsArticleBodies(
   headlines: EnrichableHeadline[],
+  now: Date = new Date(),
 ): boolean {
-  return headlines.some((headline) => needsArticleBody(headline));
+  const today = manilaYmd(now);
+  if (!today) {
+    return headlines.some((headline) => needsArticleBody(headline));
+  }
+  const tomorrow = addCalendarDays(today, 1);
+  const current = headlines.filter((headline) => {
+    if (!BODY_SOURCES.test(headline.source ?? "")) return false;
+    const publishedAt =
+      headline.publishedAt instanceof Date &&
+      Number.isFinite(headline.publishedAt.getTime())
+        ? headline.publishedAt
+        : now;
+    const dates = parseCoverageDates(headline.title ?? "", publishedAt);
+    return dates.some((date) => date === today || date === tomorrow);
+  });
+  if (current.length === 0) return false;
+  if (current.some((headline) => headline.body)) return false;
+  return current.some((headline) => needsArticleBody(headline));
 }
-
-type EnrichableHeadline = {
-  link: string;
-  source?: string;
-  body?: string;
-  title?: string;
-};
 
 const BODY_LIMIT = 6;
 const RESOLVER_LIMIT = 2;

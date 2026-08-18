@@ -190,14 +190,55 @@ test("extracts Open Graph description when the article body script is missing", 
 
 test("needsArticleBodies stays true after a Google link is resolved without a body", () => {
   assert.equal(
-    needsArticleBodies([
-      {
-        title: "#WalangPasok: Work, class suspensions for August 19, 2026",
-        link: "https://www.abs-cbn.com/news/aug19",
-        source: "ABS-CBN",
-      },
-    ]),
+    needsArticleBodies(
+      [
+        {
+          title: "#WalangPasok: Work, class suspensions for August 19, 2026",
+          link: "https://www.abs-cbn.com/news/aug19",
+          source: "ABS-CBN",
+        },
+      ],
+      new Date("2026-08-18T16:39:00Z"),
+    ),
     true,
+  );
+});
+
+test("yesterday's dated Google links do not keep the request waiting", () => {
+  assert.equal(
+    needsArticleBodies(
+      [
+        {
+          title: "[Walang Pasok] Class suspensions, Tuesday, August 18, 2026",
+          link: "https://news.google.com/rss/articles/old",
+          source: "Rappler",
+        },
+      ],
+      new Date("2026-08-18T16:39:00Z"),
+    ),
+    false,
+  );
+});
+
+test("one current dated body is enough to stop waiting on other Google links", () => {
+  assert.equal(
+    needsArticleBodies(
+      [
+        {
+          title: "#WalangPasok: Work, class suspensions for August 19, 2026",
+          link: "https://www.abs-cbn.com/news/aug19",
+          source: "ABS-CBN",
+          body: "Malacañang announced the suspension of face-to-face classes in the National Capital Region.",
+        },
+        {
+          title: "WALANG PASOK: Class suspensions for Wednesday, August 19, 2026",
+          link: "https://news.google.com/rss/articles/gma",
+          source: "GMA Network",
+        },
+      ],
+      new Date("2026-08-18T16:39:00Z"),
+    ),
+    false,
   );
 });
 
