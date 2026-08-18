@@ -72,6 +72,50 @@ test("fresh cache entries skip the network", async () => {
   assert.equal(headlines.headlines.length, 1);
 });
 
+test("fresh cache still refreshes when Google links have no article body", async () => {
+  const now = new Date("2026-08-13T21:00:00Z");
+  const googleHeadline: Headline = {
+    title: "WALANG PASOK: Class suspensions for Wednesday, August 19, 2026",
+    link: "https://news.google.com/rss/articles/CBMi123",
+    source: "ABS-CBN",
+    publishedAt: new Date("2026-08-18T10:57:00Z"),
+  };
+  const { store, data } = memoryStore({
+    [newsKey("ncr")]: encodeHeadlines(
+      [googleHeadline],
+      new Date("2026-08-13T20:55:00Z"),
+    ),
+  });
+
+  const background: Promise<unknown>[] = [];
+  let loads = 0;
+  const result = await cachedHeadlines(
+    store,
+    "ncr",
+    now,
+    async () => {
+      loads += 1;
+      return [
+        {
+          ...googleHeadline,
+          link: "https://www.abs-cbn.com/news/story",
+          body: "Malacañang announced the suspension of face-to-face classes in the National Capital Region.",
+        },
+      ];
+    },
+    { revalidate: (promise) => background.push(promise) },
+  );
+
+  assert.equal(result.headlines[0]?.body, undefined);
+  assert.equal(background.length, 1);
+  await Promise.all(background);
+  assert.equal(loads, 1);
+  assert.match(
+    decodeHeadlines(data.get(newsKey("ncr")) ?? null)?.headlines[0]?.body ?? "",
+    /National Capital Region/,
+  );
+});
+
 test("stale cache entries are refreshed and written back", async () => {
   const now = new Date("2026-08-13T21:00:00Z");
   const { store, data } = memoryStore({

@@ -32,6 +32,13 @@ const manila: Place = {
   aliases: ["City of Manila", "Manila City"],
 };
 
+const caloocan: Place = {
+  ...manila,
+  id: "caloocan",
+  name: "Caloocan",
+  aliases: ["Caloocan City", "City of Caloocan"],
+};
+
 const now = new Date("2026-08-13T21:00:00Z");
 
 function headline(
@@ -332,6 +339,24 @@ test("a roundup posted a day early still counts on the evening before", () => {
     days.find((day) => day.date === "2026-08-18")?.verdicts.classes,
     "MERON",
   );
+});
+
+test("Palace NCR suspension updates Manila and Caloocan from the article body", () => {
+  const palace = headline(
+    "#WalangPasok: Work, class suspensions for August 19, 2026 due to habagat rains, floods",
+    "ABS-CBN",
+    "2026-08-18T10:57:00Z",
+    "MANILA (2nd UPDATE) — Malacañang announced the suspension of face-to-face classes in all levels, as well as work in government offices in the National Capital Region and 17 other provinces on Wednesday, August 19.",
+  );
+  const now = new Date("2026-08-18T16:51:00Z");
+  const inManila = scoreHeadlines([palace], manila, now);
+  const inCaloocan = scoreHeadlines([palace], caloocan, now);
+  const metro = scoreHeadlines([palace], metroManila, now);
+  assert.equal(inManila.verdicts.classes, "WALA");
+  assert.equal(inManila.verdicts.work, "WALA");
+  assert.equal(inManila.verdicts.government, "WALA");
+  assert.equal(inCaloocan.verdicts.classes, "WALA");
+  assert.equal(metro.verdicts.classes, "WALA");
 });
 
 test("weekly summary reads Aug. 19 without a year", () => {

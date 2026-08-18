@@ -1,4 +1,5 @@
 import type { Headline } from "./rss.ts";
+import { needsArticleBodies } from "./articles.ts";
 
 export type HeadlineStore = {
   get(key: string): Promise<string | null>;
@@ -123,6 +124,18 @@ export async function cachedHeadlines(
 ): Promise<CachedHeadlines> {
   const entry = decodeHeadlines(await store.get(newsKey(placeId)));
   if (entry && now.getTime() - entry.fetchedAt.getTime() < freshMs) {
+    if (revalidate && needsArticleBodies(entry.headlines)) {
+      revalidate(
+        load()
+          .then((headlines) => {
+            const preserved = preserveHeadlineBodies(headlines, entry.headlines);
+            return putHeadlines(store, placeId, preserved, now);
+          })
+          .catch((error: unknown) => {
+            console.error("Background news refresh failed", error);
+          }),
+      );
+    }
     return entry;
   }
 
