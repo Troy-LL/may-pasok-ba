@@ -7,6 +7,8 @@ import {
 import {
   decodeGoogleNewsUrlFromHtml,
   enrichArticleBodies,
+  googleNewsBatchexecuteBody,
+  publisherUrlFromBatchexecute,
 } from "./lib/articles.ts";
 import {
   getPlace,
@@ -118,6 +120,31 @@ function lazyBrowser(env: Env): {
           .waitForSelector("[data-n-a-sg]", { timeout: 8_000 })
           .catch(() => undefined);
         const html = await tab.content();
+        const formBody = googleNewsBatchexecuteBody(url, html);
+        if (formBody) {
+          try {
+            const batchText = await tab.evaluate(async (body: string) => {
+              const res = await fetch(
+                "https://news.google.com/_/DotsSplashUi/data/batchexecute",
+                {
+                  method: "POST",
+                  headers: {
+                    "Content-Type":
+                      "application/x-www-form-urlencoded;charset=UTF-8",
+                  },
+                  body,
+                },
+              );
+              return res.ok ? await res.text() : "";
+            }, formBody);
+            const decoded = publisherUrlFromBatchexecute(batchText);
+            if (decoded && !decoded.includes("news.google.com")) {
+              return { url: decoded };
+            }
+          } catch {
+            // Worker batchexecute is the fallback when the tab fetch is blocked.
+          }
+        }
         const decoded = await decodeGoogleNewsUrlFromHtml(url, html);
         return decoded ? { url: decoded } : undefined;
       } finally {
@@ -135,7 +162,12 @@ async function fetchNewsPool(env: Env): Promise<Headline[]> {
   let headlines: Headline[] = [];
   try {
     headlines = await fetchRssHeadlines(session.rssFallback);
-    return await enrichArticleBodies(headlines, session.resolveArticle);
+    try {
+      return await enrichArticleBodies(headlines, session.resolveArticle);
+    } catch (error) {
+      console.error("Article body enrichment failed", error);
+      return headlines;
+    }
   } catch (error) {
     console.error("News pool refresh failed", error);
     if (headlines.length > 0) return headlines;

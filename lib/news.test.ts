@@ -376,6 +376,99 @@ test("weekly summary reads Aug. 19 without a year", () => {
   assert.equal(days[0].verdicts.classes, "WALA");
 });
 
+test("a multi-day cancellation stays on the board for each covered day", () => {
+  const range = headline(
+    "Walang pasok in Metro Manila: classes suspended August 18-20",
+    "GMA Network",
+    "2026-08-18T00:00:00Z",
+    "National Capital Region Manila - all levels public and private",
+  );
+  const dayTwo = new Date("2026-08-19T16:30:00Z");
+  const scored = scoreHeadlines([range], manila, dayTwo);
+  assert.equal(scored.verdicts.classes, "WALA");
+  const days = summarizeWeek([range], manila, dayTwo);
+  assert.equal(
+    days.find((day) => day.date === "2026-08-18")?.verdicts.classes,
+    "WALA",
+  );
+  assert.equal(
+    days.find((day) => day.date === "2026-08-19")?.verdicts.classes,
+    "WALA",
+  );
+  assert.equal(
+    days.find((day) => day.date === "2026-08-20")?.verdicts.classes,
+    "WALA",
+  );
+});
+
+test("until-date copy still counts on a later day in the window", () => {
+  const until = headline(
+    "Walang pasok in Metro Manila until August 21 due to flooding",
+    "Rappler",
+    "2026-08-18T10:00:00Z",
+    "National Capital Region Manila - all levels public and private",
+  );
+  const friday = new Date("2026-08-20T16:30:00Z"); // Aug 21 00:30 Manila
+  assert.equal(scoreHeadlines([until], manila, friday).verdicts.classes, "WALA");
+});
+
+test("until further notice covers later days but not forever", () => {
+  const notice = headline(
+    "Walang pasok in Metro Manila until further notice",
+    "ABS-CBN",
+    "2026-08-18T10:00:00Z",
+    "National Capital Region Manila - all levels public and private",
+  );
+  const dayFive = new Date("2026-08-22T16:00:00Z");
+  assert.equal(
+    scoreHeadlines([notice], manila, dayFive).verdicts.classes,
+    "WALA",
+  );
+  const dayNine = new Date("2026-08-27T16:00:00Z");
+  assert.equal(
+    scoreHeadlines([notice], manila, dayNine).verdicts.classes,
+    "MERON",
+  );
+});
+
+test("an early Friday roundup is not same-day evidence on Wednesday", () => {
+  const friday = headline(
+    "Walang pasok in Metro Manila for August 21, 2026",
+    "GMA Network",
+    "2026-08-18T10:00:00Z",
+    "National Capital Region Manila - all levels public and private",
+  );
+  const wednesdayEvening = new Date("2026-08-19T12:00:00Z");
+  assert.equal(
+    scoreHeadlines([friday], manila, wednesdayEvening).verdicts.classes,
+    "MERON",
+  );
+  const thursdayEvening = new Date("2026-08-20T12:00:00Z");
+  const days = summarizeWeek([friday], manila, thursdayEvening);
+  assert.equal(days[0].date, "2026-08-21");
+  assert.equal(days[0].verdicts.classes, "WALA");
+  const fridayMorning = new Date("2026-08-20T16:30:00Z");
+  assert.equal(
+    scoreHeadlines([friday], manila, fridayMorning).verdicts.classes,
+    "WALA",
+  );
+});
+
+test("a body-only next-day date still drives the evening board", () => {
+  const palace = headline(
+    "#WalangPasok: Work, class suspensions due to habagat rains, floods",
+    "ABS-CBN",
+    "2026-08-18T10:57:00Z",
+    "MANILA (2nd UPDATE) — Malacañang announced the suspension of face-to-face classes in all levels, as well as work in government offices in the National Capital Region and 17 other provinces on Wednesday, August 19.",
+  );
+  const evening = new Date("2026-08-18T12:00:00Z");
+  const scored = scoreHeadlines([palace], manila, evening);
+  assert.equal(scored.verdicts.classes, "WALA");
+  assert.equal(scored.verdicts.work, "WALA");
+  const days = summarizeWeek([palace], manila, evening);
+  assert.equal(days[0].date, "2026-08-19");
+});
+
 test("NEWS_QUERIES contains keyword-split 7d queries", () => {
   assert.ok(NEWS_QUERIES.length >= 2);
   for (const q of NEWS_QUERIES) {
