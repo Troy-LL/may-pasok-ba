@@ -235,7 +235,7 @@ type EnrichableHeadline = {
 };
 
 const BODY_LIMIT = 6;
-const RESOLVER_LIMIT = 1;
+const RESOLVER_LIMIT = 2;
 const DECODE_WORKERS = 2;
 const DECODE_MS = 20_000;
 const DECODE_FETCH_MS = 8_000;
@@ -322,10 +322,34 @@ export function publisherUrlFromBatchexecute(
   }
 }
 
+export function googleNewsBatchexecuteBody(
+  sourceUrl: string,
+  html: string,
+): string | undefined {
+  const articleId = googleNewsArticleId(sourceUrl);
+  const params = googleNewsDecodeParams(html);
+  if (!articleId || !params) return undefined;
+  return `f.req=${encodeURIComponent(
+    JSON.stringify([
+      [
+        [
+          "Fbv4je",
+          `["garturlreq",[["X","X",["X","X"],null,null,1,1,"US:en",null,1,null,null,null,null,null,0,1],"X","X",1,[1,1,1],1,1,null,0,0,null,0],"${articleId}",${params.timestamp},"${params.signature}"]`,
+        ],
+      ],
+    ]),
+  )}`;
+}
+
 async function batchexecuteDecodedUrl(
   articleId: string,
   params: { signature: string; timestamp: string },
 ): Promise<string | undefined> {
+  const body = googleNewsBatchexecuteBody(
+    `https://news.google.com/rss/articles/${articleId}`,
+    `data-n-a-sg="${params.signature}" data-n-a-ts="${params.timestamp}"`,
+  );
+  if (!body) return undefined;
   const batch = await fetch(
     "https://news.google.com/_/DotsSplashUi/data/batchexecute",
     {
@@ -337,16 +361,7 @@ async function batchexecuteDecodedUrl(
         Origin: "https://news.google.com",
         Referer: "https://news.google.com/",
       },
-      body: `f.req=${encodeURIComponent(
-        JSON.stringify([
-          [
-            [
-              "Fbv4je",
-              `["garturlreq",[["X","X",["X","X"],null,null,1,1,"US:en",null,1,null,null,null,null,null,0,1],"X","X",1,[1,1,1],1,1,null,0,0,null,0],"${articleId}",${params.timestamp},"${params.signature}"]`,
-            ],
-          ],
-        ]),
-      )}`,
+      body,
       signal: AbortSignal.timeout(DECODE_FETCH_MS),
     },
   );
@@ -401,6 +416,14 @@ export async function decodeGoogleNewsUrl(
   }
 }
 
+function decodePriority(title: string): number {
+  let score = 0;
+  if (DATED_ROUNDUP.test(title)) score += 4;
+  if (/palace|malacañ|ncr|metro manila/i.test(title)) score += 4;
+  if (/walang\s*pasok|suspend|class|work|government/i.test(title)) score += 2;
+  return score;
+}
+
 function selectBodyCandidates<T extends EnrichableHeadline>(
   headlines: T[],
 ): { headline: T; index: number }[] {
@@ -408,10 +431,10 @@ function selectBodyCandidates<T extends EnrichableHeadline>(
     .map((headline, index) => ({ headline, index }))
     .filter(({ headline }) => needsArticleBody(headline))
     .sort((a, b) => {
-      const dated =
-        Number(DATED_ROUNDUP.test(b.headline.title ?? "")) -
-        Number(DATED_ROUNDUP.test(a.headline.title ?? ""));
-      if (dated !== 0) return dated;
+      const score =
+        decodePriority(b.headline.title ?? "") -
+        decodePriority(a.headline.title ?? "");
+      if (score !== 0) return score;
       return a.index - b.index;
     })
     .slice(0, BODY_LIMIT);
@@ -497,18 +520,8 @@ export async function enrichArticleBodies<T extends EnrichableHeadline>(
     .map(({ headline }) => headline.link)
     .filter((link) => !bySource.has(link));
   if (unresolved.length > 0) {
-    await Promise.all(
-      unresolved.map(async (link) => {
-        const decoded = await decodeGoogleNewsUrl(link);
-        if (!decoded) return;
-        bySource.set(link, { url: decoded });
-        cacheDecodedUrl(link, decoded);
-      }),
-    );
-
-    const stillUnresolved = unresolved.filter((link) => !bySource.has(link));
     if (resolver) {
-      for (const link of stillUnresolved.slice(0, RESOLVER_LIMIT)) {
+      for (const link of unresolved.slice(0, RESOLVER_LIMIT)) {
         try {
           const res = await resolver(link);
           if (res?.url && !res.url.includes("news.google.com")) {
@@ -519,26 +532,33 @@ export async function enrichArticleBodies<T extends EnrichableHeadline>(
           // Keep the Google link and continue with headline-only scoring.
         }
       }
-    }
-
-    const libraryFallback = stillUnresolved.filter(
-      (link) => !bySource.has(link),
-    );
-    if (!resolver && libraryFallback.length > 0) {
-      let cursor = 0;
-      const workers = Array.from(
-        { length: Math.min(DECODE_WORKERS, libraryFallback.length) },
-        async () => {
-          while (cursor < libraryFallback.length) {
-            const link = libraryFallback[cursor++];
-            const decoded = await decodeWithLibrary(link);
-            if (!decoded) continue;
-            bySource.set(link, { url: decoded });
-            cacheDecodedUrl(link, decoded);
-          }
-        },
+    } else {
+      await Promise.all(
+        unresolved.map(async (link) => {
+          const decoded = await decodeGoogleNewsUrl(link);
+          if (!decoded) return;
+          bySource.set(link, { url: decoded });
+          cacheDecodedUrl(link, decoded);
+        }),
       );
-      await Promise.all(workers);
+
+      const libraryFallback = unresolved.filter((link) => !bySource.has(link));
+      if (libraryFallback.length > 0) {
+        let cursor = 0;
+        const workers = Array.from(
+          { length: Math.min(DECODE_WORKERS, libraryFallback.length) },
+          async () => {
+            while (cursor < libraryFallback.length) {
+              const link = libraryFallback[cursor++];
+              const decoded = await decodeWithLibrary(link);
+              if (!decoded) continue;
+              bySource.set(link, { url: decoded });
+              cacheDecodedUrl(link, decoded);
+            }
+          },
+        );
+        await Promise.all(workers);
+      }
     }
   }
 

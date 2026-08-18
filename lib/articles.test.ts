@@ -106,27 +106,34 @@ test("Palace NCR order in ABS-CBN and Rappler copy applies to every NCR city", (
   }
 });
 
-test("enrichArticleBodies uses custom resolver to resolve link and body", async () => {
+test("enrich uses the resolver before Worker Google fetches", async () => {
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = (async () =>
-    new Response("<html></html>", {
-      headers: { "content-type": "text/html" },
-    })) as typeof fetch;
+  globalThis.fetch = ((input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.includes("news.google.com")) {
+      assert.fail("resolver should skip Worker Google decode");
+    }
+    return Promise.resolve(
+      new Response("<html></html>", {
+        headers: { "content-type": "text/html" },
+      }),
+    );
+  }) as typeof fetch;
   try {
-    const headlines = [
-      {
-        title: "WALANG PASOK: Class suspensions for August 17",
-        link: "https://news.google.com/rss/articles/CBMi123",
-        source: "GMA Network",
-        publishedAt: new Date("2026-08-17T01:00:00Z"),
-      },
-    ];
-    const enriched = await enrichArticleBodies(headlines, async () => {
-      return {
+    const enriched = await enrichArticleBodies(
+      [
+        {
+          title: "WALANG PASOK: Class suspensions for August 19",
+          link: "https://news.google.com/rss/articles/CBMi123",
+          source: "GMA Network",
+          publishedAt: new Date("2026-08-18T10:00:00Z"),
+        },
+      ],
+      async () => ({
         url: "https://www.gmanetwork.com/news/story/123",
         html: `<script type="application/ld+json">{"@type":"NewsArticle","articleBody":"Quezon City - all levels suspended"}</script>`,
-      };
-    });
+      }),
+    );
     assert.equal(enriched[0]?.link, "https://www.gmanetwork.com/news/story/123");
     assert.match(enriched[0]?.body ?? "", /Quezon City - all levels/);
   } finally {
