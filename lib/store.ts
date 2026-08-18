@@ -96,6 +96,8 @@ export type CacheOptions = {
   revalidate?: (refresh: Promise<unknown>) => void;
   /** Wait for dated roundup bodies instead of hoping waitUntil survives a browser tab. */
   awaitMissingBodies?: boolean;
+  /** Attach publisher bodies to the cached headlines without refetching RSS. */
+  attachBodies?: (headlines: Headline[]) => Promise<Headline[]>;
 };
 
 export function preserveHeadlineBodies(
@@ -122,7 +124,7 @@ export async function cachedHeadlines(
   placeId: string,
   now: Date,
   load: () => Promise<Headline[]>,
-  { freshMs = FRESH_MS, revalidate, awaitMissingBodies }: CacheOptions = {},
+  { freshMs = FRESH_MS, revalidate, awaitMissingBodies, attachBodies }: CacheOptions = {},
 ): Promise<CachedHeadlines> {
   const entry = decodeHeadlines(await store.get(newsKey(placeId)));
   const missingBodies = Boolean(
@@ -132,10 +134,10 @@ export async function cachedHeadlines(
   async function refreshBodies(
     current: CachedHeadlines,
   ): Promise<CachedHeadlines> {
-    const headlines = preserveHeadlineBodies(
-      await load(),
-      current.headlines,
-    );
+    const next = attachBodies
+      ? await attachBodies(current.headlines)
+      : await load();
+    const headlines = preserveHeadlineBodies(next, current.headlines);
     await putHeadlines(store, placeId, headlines, now);
     return { fetchedAt: now, headlines };
   }
