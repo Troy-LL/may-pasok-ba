@@ -90,6 +90,18 @@ test("an explicit NCR-wide suspension applies to every NCR place", () => {
   assert.equal(bodyMentionsPlace(body, ncr), true);
 });
 
+test("Palace NCR order in ABS-CBN and Rappler copy applies to every NCR city", () => {
+  const absCbn =
+    "MANILA (2nd UPDATE) — Malacañang announced the suspension of face-to-face classes in all levels, as well as work in government offices in the National Capital Region and 17 other provinces on Wednesday, August 19, due to inclement weather brought by the southwest monsoon or habagat.";
+  const rappler =
+    "Malacañang suspended face-to-face classes in all levels for public and private schools in Metro Manila and 17 provinces for Wednesday, August 19, as the southwest monsoon or habagat continues to trigger significant rainfall.";
+  for (const body of [absCbn, rappler]) {
+    assert.equal(bodyMentionsPlace(body, manila), true);
+    assert.equal(bodyMentionsPlace(body, caloocan), true);
+    assert.equal(bodyMentionsPlace(body, ncr), true);
+  }
+});
+
 test("enrichArticleBodies uses custom resolver to resolve link and body", async () => {
   const headlines = [
     {

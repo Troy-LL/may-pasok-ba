@@ -136,10 +136,11 @@ function regionWideEvidence(text: string): string | undefined {
   const region =
     "(?:metro manila|national capital region|kalakhang maynila|(?:^|[^a-z0-9])ncr(?:$|[^a-z0-9]))";
   const suspension =
-    "(?:walang\\s+pasok|suspend(?:ed|sion|ing)?|no\\s+(?:face-to-face\\s+)?classes|classes?\\s+(?:are|were)?\\s*called\\s+off)";
+    /(?:walang\s+pasok|suspensions?|suspended?|no\s+(?:face-to-face\s+)?classes|classes?\s+(?:are|were)?\s*called\s+off)/
+      .source;
   const patterns = [
     new RegExp(
-      `${suspension}.{0,180}(?:in|for|throughout|across|covering|all\\s+of)\\s+${region}`,
+      `${suspension}.{0,180}(?:in|for|throughout|across|covering|all\\s+of)\\s+(?:the\\s+)?${region}`,
     ),
     new RegExp(`${region}.{0,120}${suspension}`),
   ];
@@ -188,6 +189,18 @@ export function bodyMentionsPlace(body: string, place: Place): boolean {
   return bodyEvidenceForPlace(body, place) !== undefined;
 }
 
+export function needsArticleBodies(
+  headlines: EnrichableHeadline[],
+): boolean {
+  return headlines.some(
+    (headline) =>
+      !headline.body &&
+      typeof headline.link === "string" &&
+      headline.link.includes("news.google.com/") &&
+      BODY_SOURCES.test(headline.source ?? ""),
+  );
+}
+
 type EnrichableHeadline = {
   link: string;
   source?: string;
@@ -214,7 +227,8 @@ async function fetchArticleBody(url: string): Promise<string | undefined> {
   try {
     const response = await fetch(url, {
       headers: {
-        "User-Agent": "MayPasokBa/1.0 (public suspension evidence reader)",
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/140.0 Safari/537.36",
         Accept: "text/html,application/xhtml+xml",
       },
       redirect: "follow",
