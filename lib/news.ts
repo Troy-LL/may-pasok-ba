@@ -12,7 +12,7 @@ import {
   type ArticleResolver,
 } from "./articles.ts";
 import type { Place } from "./places.ts";
-import { parseRss, type Headline } from "./rss.ts";
+import { looksLikeRss, parseRss, type Headline } from "./rss.ts";
 
 export type { Headline, ArticleResolver };
 export type Confidence = "none" | "reported" | "confirmed";
@@ -167,14 +167,20 @@ async function loadRssQuery(
     },
   });
   if (res.ok) {
-    return relevantHeadlines(parseRss(await res.text()));
+    const text = await res.text();
+    if (looksLikeRss(text)) {
+      return relevantHeadlines(parseRss(text));
+    }
+  } else {
+    await res.body?.cancel();
   }
-  await res.body?.cancel();
 
   if (browserFallback) {
     try {
       const xml = await browserFallback(url);
-      return relevantHeadlines(parseRss(xml));
+      if (looksLikeRss(xml)) {
+        return relevantHeadlines(parseRss(xml));
+      }
     } catch (error) {
       console.error("Browser RSS fallback failed", error);
     }
@@ -192,10 +198,9 @@ async function loadRssQuery(
   return relevantHeadlines(parseRss2Json(await fallback.json()));
 }
 
-export async function fetchHeadlines(
+export async function fetchRssHeadlines(
   rssFallback?: RssFallback,
   queries = NEWS_QUERIES,
-  articleResolver?: ArticleResolver,
 ): Promise<Headline[]> {
   const lists: Headline[][] = [];
   for (const query of queries) {
@@ -208,7 +213,21 @@ export async function fetchHeadlines(
   if (lists.length === 0) {
     throw new Error("could not load news right now");
   }
-  return enrichArticleBodies(mergeHeadlines(lists), articleResolver);
+  return mergeHeadlines(lists);
+}
+
+export async function fetchHeadlines(
+  rssFallback?: RssFallback,
+  queries = NEWS_QUERIES,
+  articleResolver?: ArticleResolver,
+): Promise<Headline[]> {
+  const headlines = await fetchRssHeadlines(rssFallback, queries);
+  try {
+    return await enrichArticleBodies(headlines, articleResolver);
+  } catch (error) {
+    console.error("Article body enrichment failed", error);
+    return headlines;
+  }
 }
 
 function confidenceFromCount(count: number): Confidence {
@@ -363,6 +382,7 @@ export function statusFromHeadlines(
   headlines: Headline[],
   place: Place,
   now: Date,
+  fetchedAt: Date = now,
 ): StatusOk {
   const phDate = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Manila",
@@ -374,7 +394,7 @@ export function statusFromHeadlines(
   return {
     ok: true,
     place,
-    asOf: now.toISOString(),
+    asOf: fetchedAt.toISOString(),
     phDate,
     ...scoreHeadlines(headlines, place, now),
     days: summarizeWeek(headlines, place, now),
@@ -385,11 +405,12 @@ export function weeklyFromHeadlines(
   headlines: Headline[],
   place: Place,
   now: Date,
+  fetchedAt: Date = now,
 ): WeeklyResult {
   return {
     ok: true,
     place,
-    asOf: now.toISOString(),
+    asOf: fetchedAt.toISOString(),
     days: summarizeWeek(headlines, place, now),
   };
 }

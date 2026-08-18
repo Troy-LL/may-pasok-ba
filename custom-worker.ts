@@ -1,24 +1,29 @@
 import puppeteer from "@cloudflare/puppeteer";
 import {
-  fetchHeadlines,
+  fetchRssHeadlines,
   statusFromHeadlines,
   weeklyFromHeadlines,
-  NEWS_QUERIES,
 } from "./lib/news.ts";
+import { enrichArticleBodies } from "./lib/articles.ts";
 import {
   getPlace,
   matchGeo,
   resolvePlace,
 } from "./lib/places.ts";
 import { isCronAuthorized } from "./lib/cron.ts";
-import { cachedHeadlines, putHeadlines, singleFlight } from "./lib/store.ts";
+import {
+  cachedHeadlines,
+  putHeadlines,
+  singleFlight,
+  type CachedHeadlines,
+} from "./lib/store.ts";
 import {
   applySecurityHeaders,
   corsPreflightResponse,
   isValidCoordinate,
   sanitizeQuery,
 } from "./lib/security.ts";
-import type { Headline } from "./lib/rss.ts";
+import { looksLikeRss, type Headline } from "./lib/rss.ts";
 import type { Place } from "./lib/places.ts";
 
 type Env = CloudflareEnv & {
@@ -63,65 +68,60 @@ async function cached(
 
 type Browser = Awaited<ReturnType<typeof puppeteer.launch>>;
 
-async function browserPageRss(browser: Browser, url: string): Promise<string> {
-  const page = await browser.newPage();
-  try {
-    const response = await page.goto(url, {
-      waitUntil: "domcontentloaded",
-      timeout: 30_000,
-    });
-    if (!response?.ok()) {
-      throw new Error(`browser news ${response?.status() ?? "unavailable"}`);
-    }
-    return await page.content();
-  } finally {
-    await page.close();
-  }
-}
-
-async function fetchHeadlinesWithBrowser(env: Env): Promise<Headline[]> {
-  const browser = await puppeteer.launch(env.BROWSER);
-  try {
-    return await fetchHeadlines(
-      (rssUrl) => browserPageRss(browser, rssUrl),
-      NEWS_QUERIES,
-      async (googleUrl) => {
-        const page = await browser.newPage();
-        try {
-          await page.goto(googleUrl, {
-            waitUntil: "load",
-            timeout: 15_000,
-          });
-          let url = page.url();
-          if (url.includes("news.google.com")) {
-            try {
-              await page.waitForFunction(
-                () => !window.location.hostname.includes("news.google.com"),
-                { timeout: 5000 },
-              );
-              url = page.url();
-            } catch {
-              // Redirect did not trigger within 5s
-            }
-          }
-          if (!url.includes("news.google.com")) {
-            const html = await page.content();
-            return { url, html };
-          }
-          return undefined;
-        } catch {
-          return undefined;
-        } finally {
-          await page.close();
+function lazyBrowser(env: Env): {
+  rssFallback: (url: string) => Promise<string>;
+  close: () => Promise<void>;
+} {
+  let browserPromise: Promise<Browser> | undefined;
+  let browser: Browser | undefined;
+  return {
+    async rssFallback(url) {
+      browserPromise ??= puppeteer.launch(env.BROWSER).then((opened) => {
+        browser = opened;
+        return opened;
+      });
+      const opened = await browserPromise;
+      const page = await opened.newPage();
+      try {
+        const response = await page.goto(url, {
+          waitUntil: "domcontentloaded",
+          timeout: 30_000,
+        });
+        if (!response?.ok()) {
+          throw new Error(`browser news ${response?.status() ?? "unavailable"}`);
         }
-      },
-    );
+        const xml = await response.text();
+        if (looksLikeRss(xml)) return xml;
+        const html = await page.content();
+        if (looksLikeRss(html)) return html;
+        throw new Error("browser news was not rss");
+      } finally {
+        await page.close();
+      }
+    },
+    async close() {
+      if (browser) await browser.close();
+    },
+  };
+}
+
+async function fetchNewsPool(env: Env): Promise<Headline[]> {
+  const session = lazyBrowser(env);
+  let headlines: Headline[];
+  try {
+    headlines = await fetchRssHeadlines(session.rssFallback);
   } finally {
-    await browser.close();
+    await session.close();
+  }
+  try {
+    return await enrichArticleBodies(headlines);
+  } catch (error) {
+    console.error("Article body enrichment failed", error);
+    return headlines;
   }
 }
 
-const inFlight = singleFlight<Headline[]>();
+const inFlight = singleFlight<CachedHeadlines>();
 
 function placeFor(request: Request): Place {
   const rawQuery = new URL(request.url).searchParams.get("place") ?? "";
@@ -133,15 +133,11 @@ function headlinesFor(
   env: Env,
   ctx: ExecutionContext,
   now: Date,
-): Promise<Headline[]> {
+): Promise<CachedHeadlines> {
   return inFlight("ncr", () =>
-    cachedHeadlines(
-      env.NEWS,
-      "ncr",
-      now,
-      () => fetchHeadlinesWithBrowser(env),
-      { revalidate: (refresh) => ctx.waitUntil(refresh) },
-    ),
+    cachedHeadlines(env.NEWS, "ncr", now, () => fetchNewsPool(env), {
+      revalidate: (refresh) => ctx.waitUntil(refresh),
+    }),
   );
 }
 
@@ -153,8 +149,11 @@ async function status(
   const place = placeFor(request);
   const now = new Date();
   try {
-    const headlines = await headlinesFor(env, ctx, now);
-    return json(statusFromHeadlines(headlines, place, now), 200);
+    const cached = await headlinesFor(env, ctx, now);
+    return json(
+      statusFromHeadlines(cached.headlines, place, now, cached.fetchedAt),
+      200,
+    );
   } catch (error) {
     console.error("Current news load failed", error);
     return json({ ok: false, error: "could not load news right now" }, 502);
@@ -169,8 +168,11 @@ async function history(
   const place = placeFor(request);
   const now = new Date();
   try {
-    const headlines = await headlinesFor(env, ctx, now);
-    return json(weeklyFromHeadlines(headlines, place, now), 200);
+    const cached = await headlinesFor(env, ctx, now);
+    return json(
+      weeklyFromHeadlines(cached.headlines, place, now, cached.fetchedAt),
+      200,
+    );
   } catch (error) {
     console.error("Weekly news load failed", error);
     return json(
@@ -214,7 +216,7 @@ async function geo(request: Request): Promise<Response> {
 }
 
 async function warmNews(env: Env): Promise<string[]> {
-  const headlines = await fetchHeadlinesWithBrowser(env);
+  const headlines = await fetchNewsPool(env);
   await putHeadlines(env.NEWS, "ncr", headlines, new Date());
   return ["ncr"];
 }
@@ -266,7 +268,7 @@ export default {
     return applySecurityHeaders(response, isApi);
   },
 
-  async scheduled(_event, env, ctx) {
-    ctx.waitUntil(warmNews(env));
+  async scheduled(_event, env) {
+    await warmNews(env);
   },
 } satisfies ExportedHandler<Env>;

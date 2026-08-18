@@ -4,7 +4,7 @@ The page answers **WALA** or **MERON** for classes, work, and government offices
 
 It reads public Google News RSS via a shared headline pool built from keyword-split queries, then scores only **allowlisted Philippine outlets** (GMA, Inquirer, Rappler, Philstar, SunStar, ABS-CBN, Manila Bulletin, and similar). Random blogs are ignored. For the first 10 relevant results, it resolves the publisher link and reads the article body from GMA, ABS-CBN, Manila Bulletin, Rappler, and Philstar using source-specific extractors.
 
-Cloudflare first requests the feed directly. Because Google can reject data-center IPs with HTTP 503, production falls back to Cloudflare Browser Rendering, then RSS2JSON as a last resort; fallback results are headline-only. Headlines are cached in Cloudflare Workers KV with stale-while-revalidate and per-colo edge caching.
+Cloudflare first requests the feed directly. HTML block pages and empty bodies are not treated as a feed. Because Google can reject data-center IPs with HTTP 503, production falls back to Cloudflare Browser Rendering for the RSS XML, then RSS2JSON as a last resort; fallback results are headline-only. Article bodies are read from publisher pages without opening a browser tab per story. Headlines are cached in Cloudflare Workers KV with stale-while-revalidate.
 
 Not an official LGU or DepEd feed. It does not scrape Facebook. If the mayor posted only on Facebook, this can still be wrong. Check the **why?** links.
 
@@ -14,7 +14,7 @@ Not an official LGU or DepEd feed. It does not scrape Facebook. If the mayor pos
 - **MERON** if it finds nothing like that — **no matching news, not an official all-clear**.
 - One outlet → WALA with `1 outlet`. Two or more distinct outlets for the same kind → `2 outlets` (confirmed).
 - Classes, work, and government are scored separately. `walang pasok` alone is classes. Work and government need those words too.
-- News is cached for **20 minutes** on demand; the 5:00 AM cron still busts the cache.
+- News is cached for **20 minutes** on demand; cron still busts the cache every 2 hours, including 5:00 AM Manila.
 - The 7-day summary uses the suspension date written in a roundup title, falling back to its Manila publication date. It is news evidence, not a stored official attendance record; MERON still means no matching evidence.
 - Inquirer, SunStar, and News5/TV5 remain headline-only. News5 currently blocks server-side page fetches with HTTP 403.
 
@@ -22,9 +22,9 @@ Not an official LGU or DepEd feed. It does not scrape Facebook. If the mayor pos
 
 Type an NCR city or municipality, **Metro Manila** / NCR, or use the browser location (NCR only). Location goes through OpenStreetMap Nominatim. Metro Manila is the region, not Caloocan — a Caloocan-only headline does not flip the whole NCR.
 
-## Daily 5:00 AM check
+## Scheduled checks
 
-On Cloudflare Workers, a Cron Trigger runs at **21:00 UTC** (5:00 AM in Manila) and warms the shared NCR news pool in Workers KV. Requests are cached in KV for 7 days with background revalidation and at the edge for 20 minutes.
+On Cloudflare Workers, Cron Triggers warm the shared NCR news pool every 2 hours, plus **21:00 UTC** (5:00 AM in Manila). Requests are cached in KV for 7 days with background revalidation. The "As of" time is when headlines were fetched, not when the page was opened.
 
 `CRON_SECRET` protects manual calls to `/api/cron`; the native Cron Trigger does not need it.
 
@@ -52,4 +52,4 @@ npm run deploy
 ```
 
 Use `npm run preview` to test the production Worker runtime locally. The
-Wrangler configuration owns the custom domain and the daily Cron Trigger.
+Wrangler configuration owns the custom domain and Cron Triggers.
