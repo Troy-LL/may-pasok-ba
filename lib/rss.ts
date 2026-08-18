@@ -25,6 +25,16 @@ function tag(block: string, name: string): string {
   return m ? decodeXml(m[1]) : "";
 }
 
+export function looksLikeRss(text: string): boolean {
+  const head = text.slice(0, 4000).toLowerCase();
+  return (
+    (head.includes("<rss") ||
+      head.includes("<feed") ||
+      head.includes("<rdf:rdf")) &&
+    (text.includes("<item") || text.includes("<entry"))
+  );
+}
+
 export function parseRss(xml: string): Headline[] {
   const items = xml.match(/<item>([\s\S]*?)<\/item>/gi) ?? [];
   const out: Headline[] = [];

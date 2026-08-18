@@ -120,10 +120,10 @@ export async function cachedHeadlines(
   now: Date,
   load: () => Promise<Headline[]>,
   { freshMs = FRESH_MS, revalidate }: CacheOptions = {},
-): Promise<Headline[]> {
+): Promise<CachedHeadlines> {
   const entry = decodeHeadlines(await store.get(newsKey(placeId)));
   if (entry && now.getTime() - entry.fetchedAt.getTime() < freshMs) {
-    return entry.headlines;
+    return entry;
   }
 
   if (entry && revalidate) {
@@ -137,7 +137,7 @@ export async function cachedHeadlines(
           console.error("Background news refresh failed", error);
         }),
     );
-    return entry.headlines;
+    return entry;
   }
 
   try {
@@ -146,11 +146,11 @@ export async function cachedHeadlines(
       ? preserveHeadlineBodies(headlines, entry.headlines)
       : headlines;
     await putHeadlines(store, placeId, preserved, now);
-    return preserved;
+    return { fetchedAt: now, headlines: preserved };
   } catch (error) {
     if (!entry) throw error;
     console.error("News refresh failed, serving cached headlines", error);
-    return entry.headlines;
+    return entry;
   }
 }
 

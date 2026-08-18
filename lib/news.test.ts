@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { Place } from "./places.ts";
 import {
+  fetchRssHeadlines,
   mergeHeadlines,
   NEWS_QUERIES,
   parseRss2Json,
@@ -187,6 +188,58 @@ test("weekly summary uses the suspension date in a roundup title", () => {
   assert.equal(days[0].date, "2026-08-17");
   assert.equal(days[0].verdicts.classes, "WALA");
   assert.equal(days[1].verdicts.classes, "MERON");
+});
+
+test("status asOf is the headline fetch time, not the request time", () => {
+  const fetchedAt = new Date("2026-08-13T10:00:00Z");
+  const status = statusFromHeadlines(
+    [
+      headline(
+        "Walang pasok in Metro Manila: class suspension for Thursday",
+        "GMA Network",
+      ),
+    ],
+    metroManila,
+    now,
+    fetchedAt,
+  );
+
+  assert.equal(status.asOf, "2026-08-13T10:00:00.000Z");
+  assert.equal(status.phDate, "2026-08-14");
+});
+
+test("HTML 200 from Google is not treated as an empty feed", async () => {
+  const originalFetch = globalThis.fetch;
+  let rss2jsonCalls = 0;
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.includes("rss2json.com")) {
+      rss2jsonCalls += 1;
+      return Response.json({
+        status: "ok",
+        items: [
+          {
+            title: "Walang pasok in Quezon City - ABS-CBN",
+            link: "https://news.google.com/rss/articles/example",
+            pubDate: "2026-08-13 10:00:00",
+          },
+        ],
+      });
+    }
+    return new Response("<html><body>blocked</body></html>", {
+      status: 200,
+      headers: { "content-type": "text/html" },
+    });
+  }) as typeof fetch;
+
+  try {
+    const headlines = await fetchRssHeadlines(undefined, NEWS_QUERIES.slice(0, 1));
+    assert.equal(rss2jsonCalls, 1);
+    assert.equal(headlines[0]?.title, "Walang pasok in Quezon City");
+    assert.equal(headlines[0]?.source, "ABS-CBN");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("status carries the week so one request can fill the board", () => {

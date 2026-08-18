@@ -69,7 +69,7 @@ test("fresh cache entries skip the network", async () => {
 
   assert.equal(loads, 0);
   assert.equal(puts.length, 0);
-  assert.equal(headlines.length, 1);
+  assert.equal(headlines.headlines.length, 1);
 });
 
 test("stale cache entries are refreshed and written back", async () => {
@@ -85,7 +85,7 @@ test("stale cache entries are refreshed and written back", async () => {
     headline,
   ]);
 
-  assert.equal(headlines.length, 1, "refreshed headlines are returned");
+  assert.equal(headlines.headlines.length, 1, "refreshed headlines are returned");
   assert.equal(
     decodeHeadlines(data.get(newsKey("manila")) ?? null)?.fetchedAt.toISOString(),
     now.toISOString(),
@@ -105,7 +105,7 @@ test("a failed refresh serves the stale entry instead of throwing", async () => 
     throw new Error("news 503");
   });
 
-  assert.equal(headlines.length, 1);
+  assert.equal(headlines.headlines.length, 1);
 });
 
 test("stale entries are served at once and refreshed in the background", async () => {
@@ -123,7 +123,7 @@ test("stale entries are served at once and refreshed in the background", async (
     { revalidate: (promise) => background.push(promise) },
   );
 
-  assert.equal(headlines.length, 0);
+  assert.equal(headlines.headlines.length, 0);
   assert.equal(background.length, 1);
 
   await Promise.all(background);

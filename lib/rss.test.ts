@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseRss } from "./rss.ts";
+import { looksLikeRss, parseRss } from "./rss.ts";
 
 const SAMPLE = `<?xml version="1.0"?><rss><channel>
 <item>
@@ -15,6 +15,12 @@ const SAMPLE = `<?xml version="1.0"?><rss><channel>
   <pubDate>Thu, 13 Aug 2026 01:00:00 GMT</pubDate>
 </item>
 </channel></rss>`;
+
+test("looksLikeRss accepts feeds and rejects HTML block pages", () => {
+  assert.equal(looksLikeRss(SAMPLE), true);
+  assert.equal(looksLikeRss("<html><body>news unavailable</body></html>"), false);
+  assert.equal(looksLikeRss(""), false);
+});
 
 test("parseRss reads title, source, date", () => {
   const items = parseRss(SAMPLE);
