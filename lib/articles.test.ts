@@ -2,8 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   bodyMentionsPlace,
+  decodeGoogleNewsUrl,
   enrichArticleBodies,
   extractArticleBody,
+  googleNewsDecodeParams,
+  publisherUrlFromBatchexecute,
 } from "./articles.ts";
 import type { Place } from "./places.ts";
 
@@ -119,4 +122,103 @@ test("enrichArticleBodies uses custom resolver to resolve link and body", async 
   });
   assert.equal(enriched[0]?.link, "https://www.gmanetwork.com/news/story/123");
   assert.match(enriched[0]?.body ?? "", /Quezon City - all levels/);
+});
+
+test("googleNewsDecodeParams reads signature attributes without a DOM parse", () => {
+  const params = googleNewsDecodeParams(
+    `<div data-n-a-ts="1787072804" data-n-a-sg="Ae5Wzi8vRa8zkLaoMj6DiZlSUOAI"></div>`,
+  );
+  assert.equal(params?.timestamp, "1787072804");
+  assert.equal(params?.signature, "Ae5Wzi8vRa8zkLaoMj6DiZlSUOAI");
+});
+
+test("publisherUrlFromBatchexecute reads the inner decoded URL", () => {
+  const url = publisherUrlFromBatchexecute(
+    `)]}'\n\n${JSON.stringify([["wrb.fr", "Fbv4je", JSON.stringify([null, "https://www.abs-cbn.com/news/story"])]])}`,
+  );
+  assert.equal(url, "https://www.abs-cbn.com/news/story");
+});
+
+test("decodeGoogleNewsUrl follows Google decode params then batchexecute", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.includes("batchexecute")) {
+      return new Response(
+        `)]}'\n\n${JSON.stringify([["wrb.fr", "Fbv4je", JSON.stringify([null, "https://www.abs-cbn.com/news/story"])]])}`,
+      );
+    }
+    return new Response(
+      `<div data-n-a-ts="123" data-n-a-sg="sig"></div>`,
+    );
+  }) as typeof fetch;
+
+  try {
+    const url = await decodeGoogleNewsUrl(
+      "https://news.google.com/rss/articles/CBMidecode",
+    );
+    assert.equal(url, "https://www.abs-cbn.com/news/story");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("enrich prefers dated roundups when many Google links need bodies", async () => {
+  const originalFetch = globalThis.fetch;
+  const fetched = new Set<string>();
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    fetched.add(url);
+    if (url.includes("batchexecute")) {
+      return new Response(
+        `)]}'\n\n${JSON.stringify([["wrb.fr", "Fbv4je", JSON.stringify([null, "https://www.abs-cbn.com/news/aug19"])]])}`,
+      );
+    }
+    if (url.includes("news.google.com/rss/articles/aug19")) {
+      return new Response(
+        `<div data-n-a-ts="123" data-n-a-sg="sig"></div>`,
+      );
+    }
+    if (url.includes("abs-cbn.com")) {
+      const response = new Response(
+        `<script id="__NEXT_DATA__">{"props":{"article":{"body_html":"<p>Malacañang announced the suspension of face-to-face classes in the National Capital Region.</p>"}}}</script>`,
+        { headers: { "content-type": "text/html" } },
+      );
+      Object.defineProperty(response, "url", {
+        value: "https://www.abs-cbn.com/news/aug19",
+      });
+      return response;
+    }
+    return new Response("<html></html>", {
+      headers: { "content-type": "text/html" },
+    });
+  }) as typeof fetch;
+
+  try {
+    const headlines = [
+      ...Array.from({ length: 6 }, (_, index) => ({
+        title: `Walang pasok somewhere ${index}`,
+        link: `https://news.google.com/rss/articles/old${index}`,
+        source: "Rappler",
+        publishedAt: new Date("2026-08-18T15:00:00Z"),
+      })),
+      {
+        title:
+          "#WalangPasok: Work, class suspensions for August 19, 2026 due to habagat rains",
+        link: "https://news.google.com/rss/articles/aug19",
+        source: "ABS-CBN",
+        publishedAt: new Date("2026-08-18T10:57:00Z"),
+      },
+    ];
+    const enriched = await enrichArticleBodies(headlines);
+    const aug19 = enriched.at(-1);
+    assert.equal(aug19?.link, "https://www.abs-cbn.com/news/aug19");
+    assert.match(aug19?.body ?? "", /National Capital Region/);
+    assert.ok(
+      [...fetched].some((url) => url.includes("articles/aug19")),
+      "dated roundup must be decoded even when it is not the newest item",
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
