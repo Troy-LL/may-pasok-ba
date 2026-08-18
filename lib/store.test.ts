@@ -153,6 +153,48 @@ test("fresh cache can await missing article bodies before returning", async () =
   );
 });
 
+test("stale cache still awaits missing article bodies before returning", async () => {
+  const now = new Date("2026-08-13T21:00:00Z");
+  const googleHeadline: Headline = {
+    title: "WALANG PASOK: Class suspensions for Wednesday, August 19, 2026",
+    link: "https://news.google.com/rss/articles/CBMi123",
+    source: "ABS-CBN",
+    publishedAt: new Date("2026-08-18T10:57:00Z"),
+  };
+  const { store, data } = memoryStore({
+    [newsKey("ncr")]: encodeHeadlines(
+      [googleHeadline],
+      new Date("2026-08-13T18:00:00Z"),
+    ),
+  });
+
+  const background: Promise<unknown>[] = [];
+  const result = await cachedHeadlines(
+    store,
+    "ncr",
+    now,
+    async () => [
+      {
+        ...googleHeadline,
+        link: "https://www.abs-cbn.com/news/story",
+        body: "Malacañang announced the suspension of face-to-face classes in the National Capital Region.",
+      },
+    ],
+    {
+      awaitMissingBodies: true,
+      revalidate: (promise) => background.push(promise),
+    },
+  );
+
+  assert.equal(background.length, 0);
+  assert.match(result.headlines[0]?.body ?? "", /National Capital Region/);
+  assert.equal(result.fetchedAt.toISOString(), now.toISOString());
+  assert.match(
+    decodeHeadlines(data.get(newsKey("ncr")) ?? null)?.headlines[0]?.body ?? "",
+    /National Capital Region/,
+  );
+});
+
 test("fresh cache still refreshes when a resolved publisher URL has no article body", async () => {
   const now = new Date("2026-08-13T21:00:00Z");
   const publisherHeadline: Headline = {
