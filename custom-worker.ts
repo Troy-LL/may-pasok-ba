@@ -73,6 +73,24 @@ async function cached(
 
 type Browser = Awaited<ReturnType<typeof puppeteer.launch>>;
 
+function googleArticleOpenUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    const parts = parsed.pathname.split("/").filter(Boolean);
+    const articleId = parts.at(-1);
+    if (
+      parsed.hostname === "news.google.com" &&
+      articleId &&
+      (parts.includes("articles") || parts.includes("read"))
+    ) {
+      return `https://news.google.com/articles/${articleId}`;
+    }
+  } catch {
+    return url;
+  }
+  return url;
+}
+
 function lazyBrowser(env: Env): {
   rssFallback: (url: string) => Promise<string>;
   resolveArticle: (url: string) => Promise<{ url: string } | undefined>;
@@ -109,14 +127,18 @@ function lazyBrowser(env: Env): {
       }
     },
     async resolveArticle(url) {
-      const opened = await page();
-      const tab = await opened.newPage();
+      let tab: Awaited<ReturnType<Browser["newPage"]>> | undefined;
       try {
-        await tab.goto(url, {
+        const opened = await page();
+        tab = await opened.newPage();
+        const openUrl = googleArticleOpenUrl(url);
+        console.log("resolveArticle goto", openUrl);
+        await tab.goto(openUrl, {
           waitUntil: "domcontentloaded",
           timeout: 20_000,
         });
         const landed = tab.url();
+        console.log("resolveArticle landed", landed);
         if (landed && !landed.includes("news.google.com")) {
           return { url: landed };
         }
@@ -125,26 +147,46 @@ function lazyBrowser(env: Env): {
           .catch(() => undefined);
         const html = await tab.content();
         const formBody = googleNewsBatchexecuteBody(url, html);
+        console.log(
+          "resolveArticle html",
+          html.length,
+          formBody ? "params" : "no-params",
+        );
         if (formBody) {
-          try {
-            // page.evaluate serializes this into the browser; keep it as JS.
-            const batchText = await tab.evaluate(
-              `fetch("https://news.google.com/_/DotsSplashUi/data/batchexecute",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded;charset=UTF-8"},body:${JSON.stringify(formBody)}}).then((r)=>r.ok?r.text():"")`,
-            );
-            const decoded = publisherUrlFromBatchexecute(
-              typeof batchText === "string" ? batchText : "",
-            );
-            if (decoded && !decoded.includes("news.google.com")) {
-              return { url: decoded };
-            }
-          } catch {
-            // Worker batchexecute is the fallback when the tab fetch is blocked.
+          const batchText = await tab.evaluate((body) => {
+            return fetch(
+              "https://news.google.com/_/DotsSplashUi/data/batchexecute",
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type":
+                    "application/x-www-form-urlencoded;charset=UTF-8",
+                },
+                body: body,
+              },
+            ).then(function (res) {
+              return res.ok ? res.text() : "";
+            });
+          }, formBody);
+          const decoded = publisherUrlFromBatchexecute(
+            typeof batchText === "string" ? batchText : "",
+          );
+          console.log(
+            "resolveArticle batch",
+            typeof batchText === "string" ? batchText.length : 0,
+            decoded ?? "none",
+          );
+          if (decoded && !decoded.includes("news.google.com")) {
+            return { url: decoded };
           }
         }
         const decoded = await decodeGoogleNewsUrlFromHtml(url, html);
         return decoded ? { url: decoded } : undefined;
+      } catch (error) {
+        console.log("resolveArticle failed", String(error));
+        return undefined;
       } finally {
-        await tab.close();
+        await tab?.close().catch(() => undefined);
       }
     },
     async close() {
