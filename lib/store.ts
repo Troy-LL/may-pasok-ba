@@ -125,46 +125,62 @@ export async function cachedHeadlines(
   { freshMs = FRESH_MS, revalidate, awaitMissingBodies }: CacheOptions = {},
 ): Promise<CachedHeadlines> {
   const entry = decodeHeadlines(await store.get(newsKey(placeId)));
-  if (entry && now.getTime() - entry.fetchedAt.getTime() < freshMs) {
-    if (awaitMissingBodies && needsArticleBodies(entry.headlines)) {
-      try {
-        const headlines = preserveHeadlineBodies(
-          await load(),
-          entry.headlines,
-        );
-        await putHeadlines(store, placeId, headlines, now);
-        return { fetchedAt: now, headlines };
-      } catch (error) {
-        console.error("News body refresh failed, serving cached headlines", error);
-        return entry;
-      }
-    }
-    if (revalidate && needsArticleBodies(entry.headlines)) {
-      revalidate(
-        load()
-          .then((headlines) => {
-            const preserved = preserveHeadlineBodies(headlines, entry.headlines);
-            return putHeadlines(store, placeId, preserved, now);
-          })
-          .catch((error: unknown) => {
-            console.error("Background news refresh failed", error);
-          }),
-      );
-    }
-    return entry;
+  const missingBodies = Boolean(
+    entry && needsArticleBodies(entry.headlines),
+  );
+
+  async function refreshBodies(
+    current: CachedHeadlines,
+  ): Promise<CachedHeadlines> {
+    const headlines = preserveHeadlineBodies(
+      await load(),
+      current.headlines,
+    );
+    await putHeadlines(store, placeId, headlines, now);
+    return { fetchedAt: now, headlines };
   }
 
-  if (entry && revalidate) {
+  function refreshInBackground(current: CachedHeadlines): void {
+    if (!revalidate) return;
     revalidate(
       load()
         .then((headlines) => {
-          const preserved = preserveHeadlineBodies(headlines, entry.headlines);
+          const preserved = preserveHeadlineBodies(
+            headlines,
+            current.headlines,
+          );
           return putHeadlines(store, placeId, preserved, now);
         })
         .catch((error: unknown) => {
           console.error("Background news refresh failed", error);
         }),
     );
+  }
+
+  if (entry && now.getTime() - entry.fetchedAt.getTime() < freshMs) {
+    if (awaitMissingBodies && missingBodies) {
+      try {
+        return await refreshBodies(entry);
+      } catch (error) {
+        console.error("News body refresh failed, serving cached headlines", error);
+        return entry;
+      }
+    }
+    if (missingBodies) refreshInBackground(entry);
+    return entry;
+  }
+
+  if (entry && awaitMissingBodies && missingBodies) {
+    try {
+      return await refreshBodies(entry);
+    } catch (error) {
+      console.error("News body refresh failed, serving cached headlines", error);
+      return entry;
+    }
+  }
+
+  if (entry && revalidate) {
+    refreshInBackground(entry);
     return entry;
   }
 
