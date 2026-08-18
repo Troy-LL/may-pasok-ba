@@ -737,7 +737,7 @@ export function Board({ initialPlaceId }: { initialPlaceId?: string }) {
               </ul>
             ) : (
               <p className="mt-3">
-                No matching headlines in the last 36 hours.
+                No matching headlines for today.
               </p>
             )}
           </details>

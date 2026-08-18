@@ -268,17 +268,87 @@ test("article body can place a generic roundup without leaking other-place kinds
       headline(
         "Walang Pasok: Class suspensions for Monday, August 17",
         "GMA Network",
-        "2026-08-13T10:00:00Z",
+        "2026-08-16T10:00:00Z",
         "National Capital Region Manila - Kindergarten to Senior High School. Cavite City - classes and government work suspended.",
       ),
     ],
     manila,
-    now,
+    new Date("2026-08-16T21:00:00Z"),
   );
 
   assert.equal(scored.verdicts.classes, "WALA");
   assert.equal(scored.verdicts.government, "MERON");
   assert.equal(scored.headlines[0].body, undefined);
+});
+
+test("dated roundups for yesterday do not drive the current board after midnight", () => {
+  const scored = scoreHeadlines(
+    [
+      headline(
+        "[Walang Pasok] Class suspensions, Tuesday, August 18, 2026",
+        "Rappler",
+        "2026-08-18T15:04:29Z",
+        "National Capital Region Manila - all levels public and private",
+      ),
+    ],
+    manila,
+    new Date("2026-08-18T16:39:00Z"),
+  );
+  assert.equal(scored.verdicts.classes, "MERON");
+});
+
+test("today's dated roundup still counts when published last night", () => {
+  const scored = scoreHeadlines(
+    [
+      headline(
+        "WALANG PASOK: Class suspensions for Wednesday, August 19, 2026",
+        "GMA Network",
+        "2026-08-18T11:51:00Z",
+        "National Capital Region Manila - all levels public and private",
+      ),
+    ],
+    manila,
+    new Date("2026-08-18T16:39:00Z"),
+  );
+  assert.equal(scored.verdicts.classes, "WALA");
+});
+
+test("a roundup posted a day early still counts on the evening before", () => {
+  const evening = new Date("2026-08-18T12:00:00Z");
+  const early = headline(
+    "#WalangPasok: Work, class suspensions for August 19, 2026 due to habagat rains, floods",
+    "ABS-CBN",
+    "2026-08-18T10:57:00Z",
+    "National Capital Region Manila - all levels public and private",
+  );
+  const scored = scoreHeadlines([early], manila, evening);
+  assert.equal(scored.verdicts.classes, "WALA");
+  assert.equal(scored.verdicts.work, "WALA");
+
+  const days = summarizeWeek([early], manila, evening);
+  assert.equal(days[0].date, "2026-08-19");
+  assert.equal(days[0].verdicts.classes, "WALA");
+  assert.equal(
+    days.find((day) => day.date === "2026-08-18")?.verdicts.classes,
+    "MERON",
+  );
+});
+
+test("weekly summary reads Aug. 19 without a year", () => {
+  const days = summarizeWeek(
+    [
+      headline(
+        "Walang Pasok: Class suspensions Aug. 19 (Wednesday) due to bad weather",
+        "Inquirer.net",
+        "2026-08-18T08:46:00Z",
+        "Manila - all levels public and private",
+      ),
+    ],
+    manila,
+    new Date("2026-08-18T16:39:00Z"),
+  );
+  assert.equal(days[0].date, "2026-08-19");
+  assert.equal(days[0].verdicts.classes, "WALA");
 });
 
 test("NEWS_QUERIES contains keyword-split 7d queries", () => {

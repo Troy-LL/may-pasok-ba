@@ -297,8 +297,9 @@ export function scoreHeadlines(
   place: Place,
   now: Date,
 ): Pick<StatusOk, "verdicts" | "confidence" | "headlines"> {
+  const boardDate = relevantBoardDate(headlines, now);
   return scoreMatchingHeadlines(headlines, place, (headline) =>
-    isFresh(headline.publishedAt, now),
+    isCurrentHeadline(headline, now, boardDate),
   );
 }
 
@@ -339,19 +340,91 @@ const MONTHS: Record<string, number> = {
   december: 12,
 };
 
-function evidenceDate(headline: Headline): string | undefined {
-  const match = headline.title.match(
-    /\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?\s+(\d{1,2}),?\s+(\d{4})\b/i,
-  );
-  if (match) {
-    const month = MONTHS[match[1].toLowerCase()];
-    const day = Number(match[2]);
-    const year = Number(match[3]);
-    if (month && day >= 1 && day <= 31) {
-      return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-    }
+const MONTH_DAY_YEAR =
+  /\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})\b/i;
+const MONTH_DAY =
+  /\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?\s+(\d{1,2})(?:st|nd|rd|th)?\b/i;
+
+function isoDate(year: number, month: number, day: number): string | undefined {
+  if (!month || day < 1 || day > 31) return undefined;
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function titleSuspensionDate(
+  title: string,
+  fallbackYear?: number,
+): string | undefined {
+  const withYear = title.match(MONTH_DAY_YEAR);
+  if (withYear) {
+    return isoDate(
+      Number(withYear[3]),
+      MONTHS[withYear[1].toLowerCase()] ?? 0,
+      Number(withYear[2]),
+    );
   }
-  return manilaDate(headline.publishedAt);
+  if (!fallbackYear) return undefined;
+  const noYear = title.match(MONTH_DAY);
+  if (!noYear) return undefined;
+  return isoDate(
+    fallbackYear,
+    MONTHS[noYear[1].toLowerCase()] ?? 0,
+    Number(noYear[2]),
+  );
+}
+
+function evidenceDate(headline: Headline): string | undefined {
+  const publishedDay = manilaDate(headline.publishedAt);
+  const year = publishedDay ? Number(publishedDay.slice(0, 4)) : undefined;
+  return titleSuspensionDate(headline.title, year) ?? publishedDay;
+}
+
+function addCalendarDays(iso: string, days: number): string | undefined {
+  const match = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return undefined;
+  const date = new Date(
+    Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]) + days),
+  );
+  if (Number.isNaN(date.getTime())) return undefined;
+  return date.toISOString().slice(0, 10);
+}
+
+function relevantBoardDate(
+  headlines: Headline[],
+  now: Date,
+): string | undefined {
+  const today = manilaDate(now);
+  if (!today) return undefined;
+  const tomorrow = addCalendarDays(today, 1);
+  if (
+    tomorrow &&
+    headlines.some(
+      (headline) =>
+        isFresh(headline.publishedAt, now) &&
+        evidenceDate(headline) === tomorrow,
+    )
+  ) {
+    return tomorrow;
+  }
+  return today;
+}
+
+function isCurrentHeadline(
+  headline: Headline,
+  now: Date,
+  boardDate?: string,
+): boolean {
+  if (!isFresh(headline.publishedAt, now)) return false;
+  const today = manilaDate(now);
+  const day = boardDate ?? today;
+  if (!day) return false;
+  const publishedDay = manilaDate(headline.publishedAt);
+  const year = publishedDay ? Number(publishedDay.slice(0, 4)) : undefined;
+  const titled = titleSuspensionDate(headline.title, year);
+  if (titled) return titled === day;
+  if (publishedDay === day) return true;
+  if (day !== today) return false;
+  const yesterday = addCalendarDays(today, -1);
+  return publishedDay === yesterday;
 }
 
 export function summarizeWeek(
@@ -359,9 +432,9 @@ export function summarizeWeek(
   place: Place,
   now: Date,
 ): WeekDay[] {
-  const today = manilaDate(now);
-  if (!today) return [];
-  const anchor = new Date(`${today}T00:00:00Z`);
+  const start = relevantBoardDate(headlines, now);
+  if (!start) return [];
+  const anchor = new Date(`${start}T00:00:00Z`);
 
   return Array.from({ length: 7 }, (_, index) => {
     const date = new Date(anchor.getTime() - index * 24 * 60 * 60 * 1000)
