@@ -116,6 +116,10 @@ function lazyBrowser(env: Env): {
           waitUntil: "domcontentloaded",
           timeout: 20_000,
         });
+        const landed = tab.url();
+        if (landed && !landed.includes("news.google.com")) {
+          return { url: landed };
+        }
         await tab
           .waitForSelector("[data-n-a-sg]", { timeout: 8_000 })
           .catch(() => undefined);
@@ -123,21 +127,13 @@ function lazyBrowser(env: Env): {
         const formBody = googleNewsBatchexecuteBody(url, html);
         if (formBody) {
           try {
-            const batchText = await tab.evaluate(async (body: string) => {
-              const res = await fetch(
-                "https://news.google.com/_/DotsSplashUi/data/batchexecute",
-                {
-                  method: "POST",
-                  headers: {
-                    "Content-Type":
-                      "application/x-www-form-urlencoded;charset=UTF-8",
-                  },
-                  body,
-                },
-              );
-              return res.ok ? await res.text() : "";
-            }, formBody);
-            const decoded = publisherUrlFromBatchexecute(batchText);
+            // page.evaluate serializes this into the browser; keep it as JS.
+            const batchText = await tab.evaluate(
+              `fetch("https://news.google.com/_/DotsSplashUi/data/batchexecute",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded;charset=UTF-8"},body:${JSON.stringify(formBody)}}).then((r)=>r.ok?r.text():"")`,
+            );
+            const decoded = publisherUrlFromBatchexecute(
+              typeof batchText === "string" ? batchText : "",
+            );
             if (decoded && !decoded.includes("news.google.com")) {
               return { url: decoded };
             }

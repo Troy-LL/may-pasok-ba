@@ -532,6 +532,15 @@ export async function enrichArticleBodies<T extends EnrichableHeadline>(
           // Keep the Google link and continue with headline-only scoring.
         }
       }
+      const stillUnresolved = unresolved.filter((link) => !bySource.has(link));
+      await Promise.all(
+        stillUnresolved.slice(0, RESOLVER_LIMIT).map(async (link) => {
+          const decoded = await decodeGoogleNewsUrl(link);
+          if (!decoded) return;
+          bySource.set(link, { url: decoded });
+          cacheDecodedUrl(link, decoded);
+        }),
+      );
     } else {
       await Promise.all(
         unresolved.map(async (link) => {
