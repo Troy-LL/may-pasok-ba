@@ -194,7 +194,9 @@ type EnrichableHeadline = {
   body?: string;
 };
 
-const BODY_LIMIT = 10;
+const BODY_LIMIT = 6;
+const DECODE_WORKERS = 6;
+const DECODE_MS = 12_000;
 const BODY_SOURCES =
   /gma|abs-cbn|manila bulletin|rappler|philstar|philippine star/i;
 const decodedUrlCache = new Map<string, string>();
@@ -280,7 +282,7 @@ export async function enrichArticleBodies<T extends EnrichableHeadline>(
       const decoder = new GoogleDecoder();
       let cursor = 0;
       const workers = Array.from(
-        { length: Math.min(3, stillUnresolved.length) },
+        { length: Math.min(DECODE_WORKERS, stillUnresolved.length) },
         async () => {
           while (cursor < stillUnresolved.length) {
             const link = stillUnresolved[cursor++];
@@ -288,7 +290,7 @@ export async function enrichArticleBodies<T extends EnrichableHeadline>(
               const result = await Promise.race([
                 decoder.decode(link),
                 new Promise<undefined>((resolve) =>
-                  setTimeout(() => resolve(undefined), 8000),
+                  setTimeout(() => resolve(undefined), DECODE_MS),
                 ),
               ]);
               if (

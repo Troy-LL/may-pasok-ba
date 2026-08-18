@@ -2,7 +2,7 @@
 
 The page answers **WALA** or **MERON** for classes, work, and government offices in a Philippine city or municipality.
 
-It reads public Google News RSS via a shared headline pool built from keyword-split queries, then scores only **allowlisted Philippine outlets** (GMA, Inquirer, Rappler, Philstar, SunStar, ABS-CBN, Manila Bulletin, and similar). Random blogs are ignored. For the first 10 relevant results, it resolves the publisher link and reads the article body from GMA, ABS-CBN, Manila Bulletin, Rappler, and Philstar using source-specific extractors.
+It reads public Google News RSS via a shared headline pool built from keyword-split queries, then scores only **allowlisted Philippine outlets** (GMA, Inquirer, Rappler, Philstar, SunStar, ABS-CBN, Manila Bulletin, and similar). Random blogs are ignored. For the newest relevant Google links, it resolves the publisher URL and reads the article body from GMA, ABS-CBN, Manila Bulletin, Rappler, and Philstar using source-specific extractors.
 
 Cloudflare first requests the feed directly. HTML block pages and empty bodies are not treated as a feed. Because Google can reject data-center IPs with HTTP 503, production falls back to Cloudflare Browser Rendering for the RSS XML, then RSS2JSON as a last resort; fallback results are headline-only. Article bodies are read from publisher pages without opening a browser tab per story. Headlines are cached in Cloudflare Workers KV with stale-while-revalidate.
 
@@ -10,7 +10,7 @@ Not an official LGU or DepEd feed. It does not scrape Facebook. If the mayor pos
 
 ## How it decides
 
-- **WALA** if an allowlisted headline or supported article body from the last 36 hours names your place (or explicitly applies across NCR / Luzon / nationwide) and talks about a suspension.
+- **WALA** if an allowlisted headline or supported article body names your place (or NCR / Luzon / nationwide) and talks about a suspension **for today**, or **for tomorrow** when outlets posted early. A roundup titled August 19 still counts on the evening of August 18. Named dates for yesterday drop off the big letters after midnight. Undated posts from last night still count at 5:00 AM.
 - **MERON** if it finds nothing like that — **no matching news, not an official all-clear**.
 - One outlet → WALA with `1 outlet`. Two or more distinct outlets for the same kind → `2 outlets` (confirmed).
 - Classes, work, and government are scored separately. `walang pasok` alone is classes. Work and government need those words too.
