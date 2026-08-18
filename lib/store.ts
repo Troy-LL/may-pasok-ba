@@ -94,6 +94,8 @@ export type CacheOptions = {
   freshMs?: number;
   /** Lets a Worker finish the refresh after the stale answer is sent. */
   revalidate?: (refresh: Promise<unknown>) => void;
+  /** Wait for dated roundup bodies instead of hoping waitUntil survives a browser tab. */
+  awaitMissingBodies?: boolean;
 };
 
 export function preserveHeadlineBodies(
@@ -120,10 +122,23 @@ export async function cachedHeadlines(
   placeId: string,
   now: Date,
   load: () => Promise<Headline[]>,
-  { freshMs = FRESH_MS, revalidate }: CacheOptions = {},
+  { freshMs = FRESH_MS, revalidate, awaitMissingBodies }: CacheOptions = {},
 ): Promise<CachedHeadlines> {
   const entry = decodeHeadlines(await store.get(newsKey(placeId)));
   if (entry && now.getTime() - entry.fetchedAt.getTime() < freshMs) {
+    if (awaitMissingBodies && needsArticleBodies(entry.headlines)) {
+      try {
+        const headlines = preserveHeadlineBodies(
+          await load(),
+          entry.headlines,
+        );
+        await putHeadlines(store, placeId, headlines, now);
+        return { fetchedAt: now, headlines };
+      } catch (error) {
+        console.error("News body refresh failed, serving cached headlines", error);
+        return entry;
+      }
+    }
     if (revalidate && needsArticleBodies(entry.headlines)) {
       revalidate(
         load()

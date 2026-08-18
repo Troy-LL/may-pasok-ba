@@ -235,7 +235,7 @@ type EnrichableHeadline = {
 };
 
 const BODY_LIMIT = 6;
-const RESOLVER_LIMIT = 3;
+const RESOLVER_LIMIT = 1;
 const DECODE_WORKERS = 2;
 const DECODE_MS = 20_000;
 const DECODE_FETCH_MS = 8_000;
