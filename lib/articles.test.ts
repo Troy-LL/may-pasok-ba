@@ -6,6 +6,7 @@ import {
   enrichArticleBodies,
   extractArticleBody,
   googleNewsDecodeParams,
+  needsArticleBodies,
   publisherUrlFromBatchexecute,
 } from "./articles.ts";
 import type { Place } from "./places.ts";
@@ -158,6 +159,57 @@ test("decodeGoogleNewsUrl follows Google decode params then batchexecute", async
       "https://news.google.com/rss/articles/CBMidecode",
     );
     assert.equal(url, "https://www.abs-cbn.com/news/story");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("extracts Open Graph description when the article body script is missing", () => {
+  const html = `<meta property="og:description" content="Malacañang announced the suspension of face-to-face classes in all levels, as well as work in government offices in the National Capital Region and 17 other provinces on Wednesday, August 19."/>`;
+  assert.match(
+    extractArticleBody("https://www.abs-cbn.com/news/story", html) ?? "",
+    /National Capital Region/,
+  );
+});
+
+test("needsArticleBodies stays true after a Google link is resolved without a body", () => {
+  assert.equal(
+    needsArticleBodies([
+      {
+        title: "#WalangPasok: Work, class suspensions for August 19, 2026",
+        link: "https://www.abs-cbn.com/news/aug19",
+        source: "ABS-CBN",
+      },
+    ]),
+    true,
+  );
+});
+
+test("enrich fetches a publisher URL that was already decoded", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    assert.match(url, /abs-cbn\.com/);
+    const response = new Response(
+      `<meta property="og:description" content="Malacañang announced the suspension of face-to-face classes in all levels, as well as work in government offices in the National Capital Region and 17 other provinces."/>`,
+      { headers: { "content-type": "text/html" } },
+    );
+    Object.defineProperty(response, "url", {
+      value: "https://www.abs-cbn.com/news/aug19",
+    });
+    return response;
+  }) as typeof fetch;
+
+  try {
+    const enriched = await enrichArticleBodies([
+      {
+        title: "#WalangPasok: Work, class suspensions for August 19, 2026",
+        link: "https://www.abs-cbn.com/news/aug19",
+        source: "ABS-CBN",
+        publishedAt: new Date("2026-08-18T10:57:00Z"),
+      },
+    ]);
+    assert.match(enriched[0]?.body ?? "", /National Capital Region/);
   } finally {
     globalThis.fetch = originalFetch;
   }
