@@ -179,6 +179,19 @@ async function loadRssQuery(
     await res.body?.cancel();
   }
 
+  const fallback = await fetch(
+    `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(url)}`,
+    {
+      headers: { Accept: "application/json" },
+    },
+  );
+  if (fallback.ok) {
+    const parsed = relevantHeadlines(parseRss2Json(await fallback.json()));
+    if (parsed.length > 0) return parsed;
+  } else {
+    await fallback.body?.cancel();
+  }
+
   if (browserFallback) {
     try {
       const xml = await browserFallback(url);
@@ -190,16 +203,7 @@ async function loadRssQuery(
     }
   }
 
-  const fallback = await fetch(
-    `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(url)}`,
-    {
-      headers: { Accept: "application/json" },
-    },
-  );
-  if (!fallback.ok) {
-    throw new Error(`news ${res.status}; fallback ${fallback.status}`);
-  }
-  return relevantHeadlines(parseRss2Json(await fallback.json()));
+  throw new Error(`news ${res.status}; fallback ${fallback.status}`);
 }
 
 export async function fetchRssHeadlines(

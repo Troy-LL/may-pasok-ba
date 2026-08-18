@@ -99,10 +99,23 @@ function lazyBrowser(env: Env): {
   let browserPromise: Promise<Browser> | undefined;
   let browser: Browser | undefined;
   async function page() {
-    browserPromise ??= puppeteer.launch(env.BROWSER).then((opened) => {
-      browser = opened;
-      return opened;
-    });
+    browserPromise ??= (async () => {
+      let lastError: unknown;
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        try {
+          const opened = await puppeteer.launch(env.BROWSER);
+          browser = opened;
+          return opened;
+        } catch (error) {
+          lastError = error;
+          if (!String(error).includes("429") || attempt === 2) throw error;
+          await new Promise((resolve) =>
+            setTimeout(resolve, 4000 * (attempt + 1)),
+          );
+        }
+      }
+      throw lastError;
+    })();
     return browserPromise;
   }
   return {
@@ -215,6 +228,18 @@ async function fetchNewsPool(env: Env): Promise<Headline[]> {
   }
 }
 
+async function attachArticleBodies(
+  env: Env,
+  headlines: Headline[],
+): Promise<Headline[]> {
+  const session = lazyBrowser(env);
+  try {
+    return await enrichArticleBodies(headlines, session.resolveArticle);
+  } finally {
+    await session.close();
+  }
+}
+
 const inFlight = singleFlight<CachedHeadlines>();
 
 function placeFor(request: Request): Place {
@@ -232,6 +257,7 @@ function headlinesFor(
     cachedHeadlines(env.NEWS, "ncr", now, () => fetchNewsPool(env), {
       revalidate: (refresh) => ctx.waitUntil(refresh),
       awaitMissingBodies: true,
+      attachBodies: (headlines) => attachArticleBodies(env, headlines),
     }),
   );
 }
