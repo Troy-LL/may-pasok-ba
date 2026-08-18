@@ -126,9 +126,31 @@ export function extractArticleBody(
     );
   }
 
+  if (!bodyHtml) {
+    bodyHtml =
+      jsonStringField(html, "articleBody") ?? metaDescription(html);
+  }
   if (!bodyHtml) return undefined;
   const text = cleanHtml(bodyHtml);
   return text.length >= 20 ? text : undefined;
+}
+
+function metaDescription(html: string): string | undefined {
+  const patterns = [
+    /<meta\b[^>]*property=(["'])og:description\1[^>]*content=(["'])([\s\S]*?)\2/i,
+    /<meta\b[^>]*content=(["'])([\s\S]*?)\1[^>]*property=(["'])og:description\3/i,
+    /<meta\b[^>]*name=(["'])description\1[^>]*content=(["'])([\s\S]*?)\2/i,
+    /<meta\b[^>]*content=(["'])([\s\S]*?)\1[^>]*name=(["'])description\3/i,
+  ];
+  for (const pattern of patterns) {
+    const match = html.match(pattern);
+    if (!match) continue;
+    const value = [match[3], match[2]].find(
+      (part) => typeof part === "string" && part.length >= 20,
+    );
+    if (value) return value;
+  }
+  return undefined;
 }
 
 function regionWideEvidence(text: string): string | undefined {
@@ -189,16 +211,20 @@ export function bodyMentionsPlace(body: string, place: Place): boolean {
   return bodyEvidenceForPlace(body, place) !== undefined;
 }
 
+function needsArticleBody(headline: EnrichableHeadline): boolean {
+  if (headline.body) return false;
+  if (typeof headline.link !== "string") return false;
+  if (!BODY_SOURCES.test(headline.source ?? "")) return false;
+  return (
+    headline.link.includes("news.google.com/") ||
+    supportsArticleBody(headline.link)
+  );
+}
+
 export function needsArticleBodies(
   headlines: EnrichableHeadline[],
 ): boolean {
-  return headlines.some(
-    (headline) =>
-      !headline.body &&
-      typeof headline.link === "string" &&
-      headline.link.includes("news.google.com/") &&
-      BODY_SOURCES.test(headline.source ?? ""),
-  );
+  return headlines.some((headline) => needsArticleBody(headline));
 }
 
 type EnrichableHeadline = {
@@ -356,12 +382,7 @@ function selectBodyCandidates<T extends EnrichableHeadline>(
 ): { headline: T; index: number }[] {
   return headlines
     .map((headline, index) => ({ headline, index }))
-    .filter(
-      ({ headline }) =>
-        !headline.body &&
-        headline.link.includes("news.google.com/") &&
-        BODY_SOURCES.test(headline.source ?? ""),
-    )
+    .filter(({ headline }) => needsArticleBody(headline))
     .sort((a, b) => {
       const dated =
         Number(DATED_ROUNDUP.test(b.headline.title ?? "")) -
@@ -381,7 +402,7 @@ async function fetchArticleBody(url: string): Promise<string | undefined> {
         Accept: "text/html,application/xhtml+xml",
       },
       redirect: "follow",
-      signal: AbortSignal.timeout(5000),
+      signal: AbortSignal.timeout(8000),
       next: { revalidate: 1200, tags: ["news"] },
     });
     if (!response.ok || !supportsArticleBody(response.url)) {
@@ -443,6 +464,9 @@ export async function enrichArticleBodies<T extends EnrichableHeadline>(
   for (const { headline } of candidateIndexes) {
     const cached = decodedUrlCache.get(headline.link);
     if (cached) bySource.set(headline.link, { url: cached });
+    else if (supportsArticleBody(headline.link)) {
+      bySource.set(headline.link, { url: headline.link });
+    }
   }
 
   const unresolved = candidateIndexes
