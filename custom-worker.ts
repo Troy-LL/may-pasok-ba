@@ -4,7 +4,10 @@ import {
   statusFromHeadlines,
   weeklyFromHeadlines,
 } from "./lib/news.ts";
-import { enrichArticleBodies } from "./lib/articles.ts";
+import {
+  decodeGoogleNewsUrlFromHtml,
+  enrichArticleBodies,
+} from "./lib/articles.ts";
 import {
   getPlace,
   matchGeo,
@@ -70,20 +73,24 @@ type Browser = Awaited<ReturnType<typeof puppeteer.launch>>;
 
 function lazyBrowser(env: Env): {
   rssFallback: (url: string) => Promise<string>;
+  resolveArticle: (url: string) => Promise<{ url: string } | undefined>;
   close: () => Promise<void>;
 } {
   let browserPromise: Promise<Browser> | undefined;
   let browser: Browser | undefined;
+  async function page() {
+    browserPromise ??= puppeteer.launch(env.BROWSER).then((opened) => {
+      browser = opened;
+      return opened;
+    });
+    return browserPromise;
+  }
   return {
     async rssFallback(url) {
-      browserPromise ??= puppeteer.launch(env.BROWSER).then((opened) => {
-        browser = opened;
-        return opened;
-      });
-      const opened = await browserPromise;
-      const page = await opened.newPage();
+      const opened = await page();
+      const tab = await opened.newPage();
       try {
-        const response = await page.goto(url, {
+        const response = await tab.goto(url, {
           waitUntil: "domcontentloaded",
           timeout: 30_000,
         });
@@ -92,11 +99,29 @@ function lazyBrowser(env: Env): {
         }
         const xml = await response.text();
         if (looksLikeRss(xml)) return xml;
-        const html = await page.content();
+        const html = await tab.content();
         if (looksLikeRss(html)) return html;
         throw new Error("browser news was not rss");
       } finally {
-        await page.close();
+        await tab.close();
+      }
+    },
+    async resolveArticle(url) {
+      const opened = await page();
+      const tab = await opened.newPage();
+      try {
+        await tab.goto(url, {
+          waitUntil: "domcontentloaded",
+          timeout: 20_000,
+        });
+        await tab
+          .waitForSelector("[data-n-a-sg]", { timeout: 8_000 })
+          .catch(() => undefined);
+        const html = await tab.content();
+        const decoded = await decodeGoogleNewsUrlFromHtml(url, html);
+        return decoded ? { url: decoded } : undefined;
+      } finally {
+        await tab.close();
       }
     },
     async close() {
@@ -107,17 +132,16 @@ function lazyBrowser(env: Env): {
 
 async function fetchNewsPool(env: Env): Promise<Headline[]> {
   const session = lazyBrowser(env);
-  let headlines: Headline[];
+  let headlines: Headline[] = [];
   try {
     headlines = await fetchRssHeadlines(session.rssFallback);
+    return await enrichArticleBodies(headlines, session.resolveArticle);
+  } catch (error) {
+    console.error("News pool refresh failed", error);
+    if (headlines.length > 0) return headlines;
+    throw error;
   } finally {
     await session.close();
-  }
-  try {
-    return await enrichArticleBodies(headlines);
-  } catch (error) {
-    console.error("Article body enrichment failed", error);
-    return headlines;
   }
 }
 

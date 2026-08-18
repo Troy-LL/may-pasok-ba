@@ -235,6 +235,7 @@ type EnrichableHeadline = {
 };
 
 const BODY_LIMIT = 6;
+const RESOLVER_LIMIT = 3;
 const DECODE_WORKERS = 2;
 const DECODE_MS = 20_000;
 const DECODE_FETCH_MS = 8_000;
@@ -280,8 +281,14 @@ function googleNewsArticleId(sourceUrl: string): string | undefined {
 export function googleNewsDecodeParams(
   html: string,
 ): { signature: string; timestamp: string } | undefined {
-  const signature = html.match(/data-n-a-sg="([^"]+)"/)?.[1];
-  const timestamp = html.match(/data-n-a-ts="([^"]+)"/)?.[1];
+  const signature =
+    html.match(/data-n-a-sg="([^"]+)"/)?.[1] ??
+    html.match(/data-n-a-sg='([^']+)'/)?.[1] ??
+    html.match(/data-n-a-sg=\\"([^"]+)\\"/)?.[1];
+  const timestamp =
+    html.match(/data-n-a-ts="([^"]+)"/)?.[1] ??
+    html.match(/data-n-a-ts='([^']+)'/)?.[1] ??
+    html.match(/data-n-a-ts=\\"([^"]+)\\"/)?.[1];
   if (!signature || !timestamp) return undefined;
   return { signature, timestamp };
 }
@@ -315,6 +322,58 @@ export function publisherUrlFromBatchexecute(
   }
 }
 
+async function batchexecuteDecodedUrl(
+  articleId: string,
+  params: { signature: string; timestamp: string },
+): Promise<string | undefined> {
+  const batch = await fetch(
+    "https://news.google.com/_/DotsSplashUi/data/batchexecute",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+        "User-Agent": BROWSER_UA,
+        Accept: "*/*",
+        Origin: "https://news.google.com",
+        Referer: "https://news.google.com/",
+      },
+      body: `f.req=${encodeURIComponent(
+        JSON.stringify([
+          [
+            [
+              "Fbv4je",
+              `["garturlreq",[["X","X",["X","X"],null,null,1,1,"US:en",null,1,null,null,null,null,null,0,1],"X","X",1,[1,1,1],1,1,null,0,0,null,0],"${articleId}",${params.timestamp},"${params.signature}"]`,
+            ],
+          ],
+        ]),
+      )}`,
+      signal: AbortSignal.timeout(DECODE_FETCH_MS),
+    },
+  );
+  if (!batch.ok) {
+    await cancelIfUnused(batch);
+    return undefined;
+  }
+  const decoded = publisherUrlFromBatchexecute(await batch.text());
+  if (!decoded || decoded.includes("news.google.com")) return undefined;
+  return decoded;
+}
+
+export async function decodeGoogleNewsUrlFromHtml(
+  sourceUrl: string,
+  html: string,
+): Promise<string | undefined> {
+  const articleId = googleNewsArticleId(sourceUrl);
+  if (!articleId || html.length > 2_000_000) return undefined;
+  const params = googleNewsDecodeParams(html);
+  if (!params) return undefined;
+  try {
+    return await batchexecuteDecodedUrl(articleId, params);
+  } catch {
+    return undefined;
+  }
+}
+
 export async function decodeGoogleNewsUrl(
   sourceUrl: string,
 ): Promise<string | undefined> {
@@ -336,42 +395,7 @@ export async function decodeGoogleNewsUrl(
       await cancelIfUnused(page);
       return undefined;
     }
-    const html = await page.text();
-    if (html.length > 2_000_000) return undefined;
-    const params = googleNewsDecodeParams(html);
-    if (!params) return undefined;
-
-    const batch = await fetch(
-      "https://news.google.com/_/DotsSplashUi/data/batchexecute",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
-          "User-Agent": BROWSER_UA,
-          Accept: "*/*",
-          Origin: "https://news.google.com",
-          Referer: "https://news.google.com/",
-        },
-        body: `f.req=${encodeURIComponent(
-          JSON.stringify([
-            [
-              [
-                "Fbv4je",
-                `["garturlreq",[["X","X",["X","X"],null,null,1,1,"US:en",null,1,null,null,null,null,null,0,1],"X","X",1,[1,1,1],1,1,null,0,0,null,0],"${articleId}",${params.timestamp},"${params.signature}"]`,
-              ],
-            ],
-          ]),
-        )}`,
-        signal: AbortSignal.timeout(DECODE_FETCH_MS),
-      },
-    );
-    if (!batch.ok) {
-      await cancelIfUnused(batch);
-      return undefined;
-    }
-    const decoded = publisherUrlFromBatchexecute(await batch.text());
-    if (!decoded || decoded.includes("news.google.com")) return undefined;
-    return decoded;
+    return await decodeGoogleNewsUrlFromHtml(sourceUrl, await page.text());
   } catch {
     return undefined;
   }
@@ -473,8 +497,18 @@ export async function enrichArticleBodies<T extends EnrichableHeadline>(
     .map(({ headline }) => headline.link)
     .filter((link) => !bySource.has(link));
   if (unresolved.length > 0) {
+    await Promise.all(
+      unresolved.map(async (link) => {
+        const decoded = await decodeGoogleNewsUrl(link);
+        if (!decoded) return;
+        bySource.set(link, { url: decoded });
+        cacheDecodedUrl(link, decoded);
+      }),
+    );
+
+    const stillUnresolved = unresolved.filter((link) => !bySource.has(link));
     if (resolver) {
-      for (const link of unresolved) {
+      for (const link of stillUnresolved.slice(0, RESOLVER_LIMIT)) {
         try {
           const res = await resolver(link);
           if (res?.url && !res.url.includes("news.google.com")) {
@@ -482,27 +516,15 @@ export async function enrichArticleBodies<T extends EnrichableHeadline>(
             cacheDecodedUrl(link, res.url);
           }
         } catch {
-          // Continue to fallback decoder
+          // Keep the Google link and continue with headline-only scoring.
         }
       }
-    }
-
-    const stillUnresolved = unresolved.filter((link) => !bySource.has(link));
-    if (stillUnresolved.length > 0) {
-      await Promise.all(
-        stillUnresolved.map(async (link) => {
-          const decoded = await decodeGoogleNewsUrl(link);
-          if (!decoded) return;
-          bySource.set(link, { url: decoded });
-          cacheDecodedUrl(link, decoded);
-        }),
-      );
     }
 
     const libraryFallback = stillUnresolved.filter(
       (link) => !bySource.has(link),
     );
-    if (libraryFallback.length > 0) {
+    if (!resolver && libraryFallback.length > 0) {
       let cursor = 0;
       const workers = Array.from(
         { length: Math.min(DECODE_WORKERS, libraryFallback.length) },
