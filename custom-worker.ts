@@ -161,6 +161,7 @@ function headlinesFor(
   return inFlight("ncr", () =>
     cachedHeadlines(env.NEWS, "ncr", now, () => fetchNewsPool(env), {
       revalidate: (refresh) => ctx.waitUntil(refresh),
+      awaitMissingBodies: true,
     }),
   );
 }
