@@ -18,6 +18,9 @@ import {
 import { isCronAuthorized } from "./lib/cron.ts";
 import {
   cachedHeadlines,
+  decodeHeadlines,
+  newsKey,
+  preserveHeadlineBodies,
   putHeadlines,
   singleFlight,
   type CachedHeadlines,
@@ -337,8 +340,15 @@ async function geo(request: Request): Promise<Response> {
 }
 
 async function warmNews(env: Env): Promise<string[]> {
+  const existing = decodeHeadlines(await env.NEWS.get(newsKey("ncr")));
   const headlines = await fetchNewsPool(env);
-  await putHeadlines(env.NEWS, "ncr", headlines, new Date());
+  if (headlines.length === 0 && existing?.headlines.length) {
+    return ["ncr"];
+  }
+  const preserved = existing
+    ? preserveHeadlineBodies(headlines, existing.headlines)
+    : headlines;
+  await putHeadlines(env.NEWS, "ncr", preserved, new Date());
   return ["ncr"];
 }
 

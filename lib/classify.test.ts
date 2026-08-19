@@ -79,6 +79,22 @@ test("work and government are separate from classes", () => {
   });
 });
 
+test("Palace alternative modes cover classes, work, and government offices", () => {
+  const title =
+    "Palace to schools, gov't offices in NCR, Luzon areas: Shift to alternative modes on Aug.19";
+  assert.deepEqual(classifyHeadline(title), {
+    classes: true,
+    work: false,
+    government: true,
+  });
+  assert.deepEqual(
+    classifyHeadline(
+      `${title} alternative work arrangements in the National Capital Region`,
+    ),
+    { classes: true, work: true, government: true },
+  );
+});
+
 test("lifted suspension is not WALA", () => {
   assert.deepEqual(classifyHeadline("May pasok: class suspension lifted in Cebu City"), {
     classes: false,

@@ -220,7 +220,7 @@ test("yesterday's dated Google links do not keep the request waiting", () => {
   );
 });
 
-test("one current dated body is enough to stop waiting on other Google links", () => {
+test("a Palace body is enough to stop waiting on leftover class-list Google links", () => {
   assert.equal(
     needsArticleBodies(
       [
@@ -240,6 +240,36 @@ test("one current dated body is enough to stop waiting on other Google links", (
     ),
     false,
   );
+});
+
+test("a classes-only body still waits for a Palace or work Google link", () => {
+  assert.equal(
+    needsArticleBodies(
+      [
+        {
+          title: "WALANG PASOK: Mga suspendidong klase sa Miyerkoles, August 19, 2026",
+          link: "https://www.gmanetwork.com/news/balitambayan/aug19",
+          source: "GMA Network",
+          body: "METRO MANILA Marikina -- all levels public and private schools",
+        },
+        {
+          title: "#WalangPasok: Work, class suspensions for August 19, 2026 due to habagat rains, floods",
+          link: "https://news.google.com/rss/articles/abscbn",
+          source: "ABS-CBN",
+        },
+      ],
+      new Date("2026-08-19T00:10:00Z"),
+    ),
+    true,
+  );
+});
+
+test("Palace alternative-work copy still counts as NCR-wide even without the word suspended", () => {
+  const body =
+    "Malacañang instructed schools and government offices in the National Capital Region and other areas to shift to alternative work arrangements on Wednesday, August 19.";
+  assert.equal(bodyMentionsPlace(body, manila), true);
+  assert.equal(bodyMentionsPlace(body, caloocan), true);
+  assert.equal(bodyMentionsPlace(body, ncr), true);
 });
 
 test("enrich fetches a publisher URL that was already decoded", async () => {
