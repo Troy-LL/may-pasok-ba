@@ -7,6 +7,7 @@ import {
   encodeHeadlines,
   newsKey,
   preserveHeadlineBodies,
+  mergeNewsPool,
   singleFlight,
   type HeadlineStore,
 } from "./store.ts";
@@ -414,6 +415,75 @@ test("preserveHeadlineBodies matches the same Google article id across query str
   ];
   const merged = preserveHeadlineBodies(fresh, existing);
   assert.equal(merged[0]?.body, "National Capital Region - all levels");
+});
+
+test("mergeNewsPool keeps a Palace body when RSS no longer returns that story", () => {
+  const palace: Headline = {
+    title: "#WalangPasok: Work, class suspensions for August 19, 2026 due to habagat rains, floods",
+    link: "https://www.abs-cbn.com/news/aug19",
+    source: "ABS-CBN",
+    publishedAt: new Date("2026-08-18T14:00:35Z"),
+    body: "Malacañang announced the suspension of face-to-face classes in all levels, as well as work in government offices in the National Capital Region and 17 other provinces on Wednesday, August 19.",
+  };
+  const gmaList: Headline = {
+    title: "WALANG PASOK: Mga suspendidong klase sa Miyerkoles, August 19, 2026",
+    link: "https://news.google.com/rss/articles/gmalist",
+    source: "GMA Network",
+    publishedAt: new Date("2026-08-18T22:14:51Z"),
+  };
+  const merged = mergeNewsPool([gmaList], [palace, gmaList], new Date("2026-08-19T00:20:00Z"));
+  assert.equal(
+    merged.some((item) => item.source === "ABS-CBN" && item.body?.includes("National Capital Region")),
+    true,
+  );
+  assert.equal(
+    merged.some((item) => item.title.includes("Mga suspendidong klase")),
+    true,
+  );
+});
+
+test("mergeNewsPool does not keep a week-old body that no longer covers the board", () => {
+  const old: Headline = {
+    title: "WALANG PASOK: Class suspensions for Saturday, August 8, 2026",
+    link: "https://www.gmanetwork.com/news/aug8",
+    source: "GMA Network",
+    publishedAt: new Date("2026-08-07T10:00:00Z"),
+    body: "National Capital Region Manila - all levels public and private",
+  };
+  const merged = mergeNewsPool([], [old], new Date("2026-08-19T00:20:00Z"));
+  assert.equal(merged.some((item) => item.link === old.link), false);
+});
+
+test("a stale RSS refresh that omits the Palace story still keeps its body in KV", async () => {
+  const now = new Date("2026-08-19T01:00:00Z");
+  const palace: Headline = {
+    title: "#WalangPasok: Work, class suspensions for August 19, 2026 due to habagat rains, floods",
+    link: "https://www.abs-cbn.com/news/aug19",
+    source: "ABS-CBN",
+    publishedAt: new Date("2026-08-18T14:00:35Z"),
+    body: "Malacañang announced the suspension of face-to-face classes in the National Capital Region.",
+  };
+  const { store, data } = memoryStore({
+    [newsKey("ncr")]: encodeHeadlines([palace], new Date("2026-08-19T00:00:00Z")),
+  });
+  const background: Promise<unknown>[] = [];
+  const onlyList: Headline = {
+    title: "WALANG PASOK: Mga suspendidong klase sa Miyerkoles, August 19, 2026",
+    link: "https://news.google.com/rss/articles/gmalist",
+    source: "GMA Network",
+    publishedAt: new Date("2026-08-18T22:14:51Z"),
+  };
+  await cachedHeadlines(store, "ncr", now, async () => [onlyList], {
+    revalidate: (promise) => background.push(promise),
+  });
+  await Promise.all(background);
+  const updated = decodeHeadlines(data.get(newsKey("ncr")) ?? null);
+  assert.equal(
+    updated?.headlines.some(
+      (item) => item.source === "ABS-CBN" && item.body?.includes("National Capital Region"),
+    ),
+    true,
+  );
 });
 
 test("stale entries preserve extracted bodies when refreshed in background", async () => {

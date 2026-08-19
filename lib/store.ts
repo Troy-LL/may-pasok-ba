@@ -1,5 +1,6 @@
 import type { Headline } from "./rss.ts";
 import { needsArticleBodies } from "./articles.ts";
+import { addCalendarDays, headlineAppliesOn, manilaYmd } from "./dates.ts";
 
 export type HeadlineStore = {
   get(key: string): Promise<string | null>;
@@ -17,6 +18,8 @@ export type CachedHeadlines = {
 
 const FRESH_MS = 20 * 60 * 1000;
 const TTL_SECONDS = 7 * 24 * 60 * 60;
+const MAX_HEADLINES = 80;
+const CARRY_DAYS = 7;
 
 export function newsKey(placeId: string): string {
   return `news:${placeId}`;
@@ -158,6 +161,79 @@ export function preserveHeadlineBodies(
   });
 }
 
+function identityKeys(headline: Headline): string[] {
+  const keys = [headline.link, `${headline.source}\0${headline.title}`];
+  const id = googleArticleId(headline.link);
+  if (id) keys.push(`gid:${id}`);
+  return keys;
+}
+
+function stillRelevant(headline: Headline, now: Date): boolean {
+  const today = manilaYmd(now);
+  if (!today) return Boolean(headline.body);
+  const days = [addCalendarDays(today, 1)];
+  for (let offset = 0; offset < CARRY_DAYS; offset += 1) {
+    days.push(addCalendarDays(today, -offset));
+  }
+  return days.some(
+    (date) => date && headlineAppliesOn(headline, date, now),
+  );
+}
+
+function currentDatedBodyCount(headlines: Headline[], now: Date): number {
+  const today = manilaYmd(now);
+  if (!today) return headlines.filter((headline) => headline.body).length;
+  const tomorrow = addCalendarDays(today, 1);
+  return headlines.filter((headline) => {
+    if (!headline.body) return false;
+    return (
+      headlineAppliesOn(headline, today, now) ||
+      Boolean(tomorrow && headlineAppliesOn(headline, tomorrow, now))
+    );
+  }).length;
+}
+
+function capHeadlines(headlines: Headline[]): Headline[] {
+  if (headlines.length <= MAX_HEADLINES) return headlines;
+  const withBody = headlines.filter((headline) => headline.body);
+  const without = headlines.filter((headline) => !headline.body);
+  return [...withBody, ...without].slice(0, MAX_HEADLINES);
+}
+
+export function mergeNewsPool(
+  fresh: Headline[],
+  existing: Headline[],
+  now: Date = new Date(),
+): Headline[] {
+  const preserved = preserveHeadlineBodies(fresh, existing);
+  const seen = new Set<string>();
+  for (const headline of preserved) {
+    for (const key of identityKeys(headline)) seen.add(key);
+  }
+
+  const carried: Headline[] = [];
+  for (const headline of existing) {
+    if (!headline.body) continue;
+    if (identityKeys(headline).some((key) => seen.has(key))) continue;
+    if (!stillRelevant(headline, now)) continue;
+    carried.push(headline);
+    for (const key of identityKeys(headline)) seen.add(key);
+  }
+
+  const merged = [...preserved, ...carried].sort(
+    (a, b) => b.publishedAt.getTime() - a.publishedAt.getTime(),
+  );
+
+  if (
+    currentDatedBodyCount(existing, now) > 0 &&
+    currentDatedBodyCount(merged, now) === 0
+  ) {
+    return existing;
+  }
+
+  return capHeadlines(merged);
+}
+
 export async function cachedHeadlines(
   store: HeadlineStore,
   placeId: string,
@@ -176,7 +252,7 @@ export async function cachedHeadlines(
     const next = attachBodies
       ? await attachBodies(current.headlines)
       : await load();
-    const headlines = preserveHeadlineBodies(next, current.headlines);
+    const headlines = mergeNewsPool(next, current.headlines, now);
     await putHeadlines(store, placeId, headlines, now);
     return { fetchedAt: now, headlines };
   }
@@ -186,9 +262,10 @@ export async function cachedHeadlines(
     revalidate(
       load()
         .then((headlines) => {
-          const preserved = preserveHeadlineBodies(
+          const preserved = mergeNewsPool(
             headlines,
             current.headlines,
+            now,
           );
           return putHeadlines(store, placeId, preserved, now);
         })
@@ -228,7 +305,7 @@ export async function cachedHeadlines(
   try {
     const headlines = await load();
     const preserved = entry
-      ? preserveHeadlineBodies(headlines, entry.headlines)
+      ? mergeNewsPool(headlines, entry.headlines, now)
       : headlines;
     await putHeadlines(store, placeId, preserved, now);
     return { fetchedAt: now, headlines: preserved };
