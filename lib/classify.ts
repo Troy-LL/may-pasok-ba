@@ -15,7 +15,7 @@ export function fold(s: string): string {
     .replace(/ñ/gi, "n")
     .normalize("NFKD")
     .replace(/\p{M}/gu, "")
-    .replace(/[.]/g, "")
+    .replace(/[.'’]/g, "")
     .toLowerCase();
 }
 
@@ -46,7 +46,7 @@ const PROVINCE_WIDE =
   /entire|whole of|all of|province[- ]wide|whole province|lahat ng (?:mga )?(?:bayan|munisipyo|lungsod)|buong/;
 
 const SUSPEND =
-  /walang\s+pasok|suspensions?|suspended?|no\s+classes|no\s+work|cancel(?:led)?\s+class|call(?:ed)?\s+off/;
+  /walang\s+pasok|suspensions?|suspended?|no\s+classes|no\s+work|cancel(?:led)?\s+class|call(?:ed)?\s+off|alternative\s+(?:learning|work|class|mode)|no\s+face[- ]to[- ]face|face[- ]to[- ]face.{0,48}(?:cancel|suspend|shift|alternative)|learning\s+continuity/;
 
 const LIFTED =
   /may\s+pasok|classes\s+resume|suspension\s+lifted|no\s+suspension|hindi\s+suspend/;
@@ -82,10 +82,15 @@ export function classifyHeadline(title: string): Record<Kind, boolean> {
   const walangPasok = /walang\s+pasok/.test(t);
   const classes =
     walangPasok ||
-    /class|klase|school|deped|face[- ]to[- ]face|all levels/.test(t);
-  const work = /work|private\s+(?:office|sector)|trabaho|non-?essential/.test(t);
+    /class|klase|school|deped|face[- ]to[- ]face|all levels|alternative\s+learning|alternative\s+mode/.test(
+      t,
+    );
+  const work =
+    /work|private\s+(?:office|sector)|trabaho|non-?essential|alternative\s+work/.test(
+      t,
+    );
   const government =
-    /government|gobyerno|(?:^|[^a-z0-9])lgu(?:$|[^a-z0-9])|gov(?:ernment)?\s+office|skeletal/.test(
+    /government|gobyerno|(?:^|[^a-z0-9])lgu(?:$|[^a-z0-9])|govt?\s+office|skeletal/.test(
       t,
     );
 

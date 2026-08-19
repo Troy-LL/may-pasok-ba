@@ -90,6 +90,7 @@ export const NEWS_QUERIES = [
   '("walang pasok" OR "walangpasok" OR suspendido OR suspensiyon OR kanselado) when:7d',
   '("class suspension" OR "classes suspended" OR "suspension of classes" OR "no classes" OR "cancelled classes") when:7d',
   '("work suspension" OR "work suspended" OR "suspension of work" OR "government offices" OR "no work") when:7d',
+  '("alternative learning" OR "alternative work" OR "alternative modes" OR "face-to-face classes") when:7d',
 ];
 
 export function mergeHeadlines(headlineLists: Headline[][]): Headline[] {

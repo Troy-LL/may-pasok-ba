@@ -371,6 +371,51 @@ test("preserveHeadlineBodies retains article bodies from existing cache", () => 
   assert.equal(merged[0]?.body, "Caloocan - all levels suspended");
 });
 
+test("preserveHeadlineBodies keeps a publisher URL when RSS returns the Google link", () => {
+  const existing: Headline[] = [
+    {
+      title: "#WalangPasok: Work, class suspensions for August 19, 2026",
+      link: "https://www.abs-cbn.com/news/aug19",
+      source: "ABS-CBN",
+      publishedAt: new Date("2026-08-18T14:00:35Z"),
+      body: "Malacañang announced the suspension of face-to-face classes in the National Capital Region.",
+    },
+  ];
+  const fresh: Headline[] = [
+    {
+      title: "#WalangPasok: Work, class suspensions for August 19, 2026",
+      link: "https://news.google.com/rss/articles/CBMiABC?oc=5",
+      source: "ABS-CBN",
+      publishedAt: new Date("2026-08-18T14:00:35Z"),
+    },
+  ];
+  const merged = preserveHeadlineBodies(fresh, existing);
+  assert.equal(merged[0]?.link, "https://www.abs-cbn.com/news/aug19");
+  assert.match(merged[0]?.body ?? "", /National Capital Region/);
+});
+
+test("preserveHeadlineBodies matches the same Google article id across query strings", () => {
+  const existing: Headline[] = [
+    {
+      title: "WALANG PASOK: Class suspensions for Wednesday, August 19, 2026",
+      link: "https://news.google.com/rss/articles/CBMiXYZ?oc=5",
+      source: "GMA Network",
+      publishedAt: new Date("2026-08-18T05:48:50Z"),
+      body: "National Capital Region - all levels",
+    },
+  ];
+  const fresh: Headline[] = [
+    {
+      title: "WALANG PASOK: Class suspensions for Wednesday, August 19, 2026",
+      link: "https://news.google.com/rss/articles/CBMiXYZ?hl=en-PH",
+      source: "GMA Network",
+      publishedAt: new Date("2026-08-18T05:48:50Z"),
+    },
+  ];
+  const merged = preserveHeadlineBodies(fresh, existing);
+  assert.equal(merged[0]?.body, "National Capital Region - all levels");
+});
+
 test("stale entries preserve extracted bodies when refreshed in background", async () => {
   const now = new Date("2026-08-17T05:00:00Z");
   const cachedItem: Headline = {

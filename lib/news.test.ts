@@ -341,6 +341,27 @@ test("a roundup posted a day early still counts on the evening before", () => {
   );
 });
 
+test("Palace alternative-mode headline with NCR still covers every Metro Manila city", () => {
+  const palace = headline(
+    "Palace to schools, gov't offices in NCR, Luzon areas: Shift to alternative modes on Aug.19",
+    "GMA Network",
+    "2026-08-18T11:55:00Z",
+    "Malacañang instructed schools and government offices in the National Capital Region to shift to alternative work arrangements and alternative learning modes on Wednesday, August 19.",
+  );
+  const now = new Date("2026-08-19T00:10:00Z");
+  const inManila = scoreHeadlines([palace], manila, now);
+  const inPasig = scoreHeadlines(
+    [palace],
+    { ...manila, id: "pasig", name: "Pasig", aliases: ["Pasig City"] },
+    now,
+  );
+  assert.equal(inManila.verdicts.classes, "WALA");
+  assert.equal(inManila.verdicts.work, "WALA");
+  assert.equal(inManila.verdicts.government, "WALA");
+  assert.equal(inPasig.verdicts.classes, "WALA");
+  assert.equal(inPasig.verdicts.government, "WALA");
+});
+
 test("Palace NCR suspension updates Manila and Caloocan from the article body", () => {
   const palace = headline(
     "#WalangPasok: Work, class suspensions for August 19, 2026 due to habagat rains, floods",

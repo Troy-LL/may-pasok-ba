@@ -100,22 +100,61 @@ export type CacheOptions = {
   attachBodies?: (headlines: Headline[]) => Promise<Headline[]>;
 };
 
+function googleArticleId(link: string): string | undefined {
+  try {
+    const url = new URL(link);
+    if (url.hostname !== "news.google.com") return undefined;
+    const parts = url.pathname.split("/").filter(Boolean);
+    const kind = parts.findIndex((part) => part === "articles" || part === "read");
+    return kind >= 0 ? parts[kind + 1] : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function isGoogleNewsLink(link: string): boolean {
+  return link.includes("news.google.com");
+}
+
+function preferPublisherLink(fresh: string, previous: string): string {
+  if (isGoogleNewsLink(fresh) && previous && !isGoogleNewsLink(previous)) {
+    return previous;
+  }
+  return fresh || previous;
+}
+
 export function preserveHeadlineBodies(
   fresh: Headline[],
   existing: Headline[],
 ): Headline[] {
-  const bodiesByLinkOrTitle = new Map<string, string>();
-  for (const h of existing) {
-    if (h.body) {
-      bodiesByLinkOrTitle.set(h.link, h.body);
-      bodiesByLinkOrTitle.set(h.title, h.body);
-    }
+  const byLink = new Map<string, Headline>();
+  const byTitle = new Map<string, Headline>();
+  const bySourceTitle = new Map<string, Headline>();
+  const byGoogleId = new Map<string, Headline>();
+  for (const headline of existing) {
+    byLink.set(headline.link, headline);
+    byTitle.set(headline.title, headline);
+    bySourceTitle.set(`${headline.source}\0${headline.title}`, headline);
+    const id = googleArticleId(headline.link);
+    if (id) byGoogleId.set(id, headline);
   }
-  return fresh.map((h) => {
-    if (h.body) return h;
-    const body =
-      bodiesByLinkOrTitle.get(h.link) ?? bodiesByLinkOrTitle.get(h.title);
-    return body ? { ...h, body } : h;
+  return fresh.map((headline) => {
+    const previous =
+      byLink.get(headline.link) ??
+      (googleArticleId(headline.link)
+        ? byGoogleId.get(googleArticleId(headline.link) ?? "")
+        : undefined) ??
+      bySourceTitle.get(`${headline.source}\0${headline.title}`) ??
+      byTitle.get(headline.title);
+    if (!previous) return headline;
+    const body = headline.body || previous.body;
+    const link = preferPublisherLink(headline.link, previous.link);
+    if (!body && link === headline.link) return headline;
+    return {
+      ...headline,
+      link,
+      ...(body ? { body } : {}),
+    };
   });
 }
 

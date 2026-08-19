@@ -159,13 +159,13 @@ function regionWideEvidence(text: string): string | undefined {
   const region =
     "(?:metro manila|national capital region|kalakhang maynila|(?:^|[^a-z0-9])ncr(?:$|[^a-z0-9]))";
   const suspension =
-    /(?:walang\s+pasok|suspensions?|suspended?|no\s+(?:face-to-face\s+)?classes|classes?\s+(?:are|were)?\s*called\s+off)/
+    /(?:walang\s+pasok|suspensions?|suspended?|no\s+(?:face[- ]to[- ]face\s+)?(?:classes|work)|classes?\s+(?:are|were)?\s*called\s+off|alternative\s+(?:learning|work|class|mode)|no\s+face[- ]to[- ]face|learning\s+continuity)/
       .source;
   const patterns = [
     new RegExp(
       `${suspension}.{0,180}(?:in|for|throughout|across|covering|all\\s+of)\\s+(?:the\\s+)?${region}`,
     ),
-    new RegExp(`${region}.{0,120}${suspension}`),
+    new RegExp(`${region}.{0,220}${suspension}`),
   ];
   for (const pattern of patterns) {
     const match = pattern.exec(t);
@@ -230,6 +230,12 @@ function needsArticleBody(headline: EnrichableHeadline): boolean {
   );
 }
 
+function isPriorityBodyHeadline(headline: EnrichableHeadline): boolean {
+  return /palace|malaca[nñ]|ncr|metro manila|work|government|alternative|govt/.test(
+    fold(headline.title ?? ""),
+  );
+}
+
 export function needsArticleBodies(
   headlines: EnrichableHeadline[],
   now: Date = new Date(),
@@ -250,12 +256,14 @@ export function needsArticleBodies(
     return dates.some((date) => date === today || date === tomorrow);
   });
   if (current.length === 0) return false;
-  if (current.some((headline) => headline.body)) return false;
-  return current.some((headline) => needsArticleBody(headline));
+  const missing = current.filter((headline) => needsArticleBody(headline));
+  if (missing.length === 0) return false;
+  if (!current.some((headline) => headline.body)) return true;
+  return missing.some((headline) => isPriorityBodyHeadline(headline));
 }
 
 const BODY_LIMIT = 6;
-const RESOLVER_LIMIT = 2;
+const RESOLVER_LIMIT = 3;
 const DECODE_WORKERS = 2;
 const DECODE_MS = 20_000;
 const DECODE_FETCH_MS = 8_000;
@@ -439,7 +447,7 @@ export async function decodeGoogleNewsUrl(
 function decodePriority(title: string): number {
   let score = 0;
   if (DATED_ROUNDUP.test(title)) score += 4;
-  if (/palace|malacañ|ncr|metro manila/i.test(title)) score += 4;
+  if (/palace|malacañ|ncr|metro manila|alternative/i.test(title)) score += 4;
   if (/walang\s*pasok|suspend|class|work|government/i.test(title)) score += 2;
   return score;
 }
