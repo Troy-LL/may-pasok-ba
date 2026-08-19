@@ -8,7 +8,9 @@ import {
 import {
   headlineCoversDate,
   isCurrentHeadline,
+  manilaYmd,
   relevantBoardDate,
+  weekDates,
 } from "./dates.ts";
 import {
   bodyEvidenceForPlace,
@@ -317,23 +319,17 @@ export function summarizeWeek(
   place: Place,
   now: Date,
 ): WeekDay[] {
-  const start = relevantBoardDate(headlines, now);
-  if (!start) return [];
-  const anchor = new Date(`${start}T00:00:00Z`);
+  const today = manilaYmd(now);
+  if (!today) return [];
 
-  return Array.from({ length: 7 }, (_, index) => {
-    const date = new Date(anchor.getTime() - index * 24 * 60 * 60 * 1000)
-      .toISOString()
-      .slice(0, 10);
-    return {
-      date,
-      ...scoreMatchingHeadlines(
-        headlines,
-        place,
-        (headline) => headlineCoversDate(headline, date),
-      ),
-    };
-  });
+  return weekDates(today).map((date) => ({
+    date,
+    ...scoreMatchingHeadlines(
+      headlines,
+      place,
+      (headline) => headlineCoversDate(headline, date),
+    ),
+  }));
 }
 
 export function statusFromHeadlines(

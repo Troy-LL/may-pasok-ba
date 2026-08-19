@@ -6,6 +6,7 @@ import {
   headlineAppliesOn,
   parseCoverageDates,
   relevantBoardDate,
+  weekDates,
 } from "./dates.ts";
 import type { Headline } from "./rss.ts";
 
@@ -149,4 +150,16 @@ test("an early Friday cancellation does not drive Wednesday's board", () => {
   assert.equal(relevantBoardDate([headline], wednesdayEvening), "2026-08-19");
   assert.equal(headlineAppliesOn(headline, "2026-08-19", wednesdayEvening), false);
   assert.equal(headlineAppliesOn(headline, "2026-08-21", wednesdayEvening), true);
+});
+
+test("weekDates is always seven consecutive Manila days ending on the given day", () => {
+  assert.deepEqual(weekDates("2026-08-19"), [
+    "2026-08-19",
+    "2026-08-18",
+    "2026-08-17",
+    "2026-08-16",
+    "2026-08-15",
+    "2026-08-14",
+    "2026-08-13",
+  ]);
 });
