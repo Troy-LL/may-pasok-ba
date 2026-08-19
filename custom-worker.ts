@@ -19,8 +19,8 @@ import { isCronAuthorized } from "./lib/cron.ts";
 import {
   cachedHeadlines,
   decodeHeadlines,
+  mergeNewsPool,
   newsKey,
-  preserveHeadlineBodies,
   putHeadlines,
   singleFlight,
   type CachedHeadlines,
@@ -211,6 +211,15 @@ function lazyBrowser(env: Env): {
   };
 }
 
+async function fetchRssPool(env: Env): Promise<Headline[]> {
+  const session = lazyBrowser(env);
+  try {
+    return await fetchRssHeadlines(session.rssFallback);
+  } finally {
+    await session.close();
+  }
+}
+
 async function fetchNewsPool(env: Env): Promise<Headline[]> {
   const session = lazyBrowser(env);
   let headlines: Headline[] = [];
@@ -340,15 +349,28 @@ async function geo(request: Request): Promise<Response> {
 }
 
 async function warmNews(env: Env): Promise<string[]> {
-  const existing = decodeHeadlines(await env.NEWS.get(newsKey("ncr")));
-  const headlines = await fetchNewsPool(env);
-  if (headlines.length === 0 && existing?.headlines.length) {
-    return ["ncr"];
-  }
-  const preserved = existing
-    ? preserveHeadlineBodies(headlines, existing.headlines)
-    : headlines;
-  await putHeadlines(env.NEWS, "ncr", preserved, new Date());
+  await inFlight("ncr", async () => {
+    const now = new Date();
+    const existing = decodeHeadlines(await env.NEWS.get(newsKey("ncr")));
+    let headlines: Headline[] = [];
+    try {
+      headlines = await fetchRssPool(env);
+    } catch (error) {
+      console.error("Cron news refresh failed, keeping cached headlines", error);
+      if (existing) return existing;
+      throw error;
+    }
+    if (headlines.length === 0 && existing?.headlines.length) {
+      return existing;
+    }
+    const merged = mergeNewsPool(
+      headlines,
+      existing?.headlines ?? [],
+      now,
+    );
+    await putHeadlines(env.NEWS, "ncr", merged, now);
+    return { fetchedAt: now, headlines: merged };
+  });
   return ["ncr"];
 }
 

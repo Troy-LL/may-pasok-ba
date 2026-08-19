@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { Place } from "./places.ts";
+import { mergeNewsPool } from "./store.ts";
 import {
   fetchRssHeadlines,
   mergeHeadlines,
@@ -360,6 +361,33 @@ test("Palace alternative-mode headline with NCR still covers every Metro Manila 
   assert.equal(inManila.verdicts.government, "WALA");
   assert.equal(inPasig.verdicts.classes, "WALA");
   assert.equal(inPasig.verdicts.government, "WALA");
+});
+
+test("Pasig stays WALA after a cron RSS refresh that dropped the Palace story", () => {
+  const palace = headline(
+    "#WalangPasok: Work, class suspensions for August 19, 2026 due to habagat rains, floods",
+    "ABS-CBN",
+    "2026-08-18T14:00:35Z",
+    "Malacañang announced the suspension of face-to-face classes in all levels, as well as work in government offices in the National Capital Region and 17 other provinces on Wednesday, August 19.",
+  );
+  palace.link = "https://www.abs-cbn.com/news/aug19";
+  const listOnly = headline(
+    "WALANG PASOK: Mga suspendidong klase sa Miyerkoles, August 19, 2026",
+    "GMA Network",
+    "2026-08-18T22:14:51Z",
+    "METRO MANILA Marikina -- all levels public and private schools",
+  );
+  const now = new Date("2026-08-19T00:20:00Z");
+  const merged = mergeNewsPool([listOnly], [palace], now);
+  const pasig = { ...manila, id: "pasig", name: "Pasig", aliases: ["Pasig City"] };
+  const scored = scoreHeadlines(merged, pasig, now);
+  assert.equal(scored.verdicts.classes, "WALA");
+  assert.equal(scored.verdicts.work, "WALA");
+  assert.equal(scored.verdicts.government, "WALA");
+  assert.equal(
+    scored.headlines.some((item) => item.source === "ABS-CBN"),
+    true,
+  );
 });
 
 test("Palace NCR suspension updates Manila and Caloocan from the article body", () => {
