@@ -135,6 +135,12 @@ export function addCalendarDays(
   return date.toISOString().slice(0, 10);
 }
 
+export function weekDates(end: string): string[] {
+  return Array.from({ length: 7 }, (_, index) => {
+    return addCalendarDays(end, -index) ?? end;
+  });
+}
+
 function isoDate(
   year: number,
   month: number,

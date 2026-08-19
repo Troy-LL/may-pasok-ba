@@ -15,7 +15,7 @@ Not an official LGU or DepEd feed. It does not scrape Facebook. If the mayor pos
 - One outlet → WALA with `1 outlet`. Two or more distinct outlets for the same kind → `2 outlets` (confirmed).
 - Classes, work, and government are scored separately. `walang pasok` alone is classes. Work and government need those words too.
 - News is cached for **20 minutes** on demand; cron still refreshes RSS every 2 hours, including 5:00 AM Manila, without dropping extracted bodies. If Google stops returning a still-current Palace roundup, that copy stays in the pool until it no longer covers the board.
-- The 7-day summary uses every date a roundup covers (title or article body), falling back to its Manila publication date. It is news evidence, not a stored official attendance record; MERON still means no matching evidence.
+- The 7-day summary is **today in Manila and the six days before it** — never tomorrow, never an eighth row. Each cell uses every date a roundup covers (title or article body), falling back to its Manila publication date. It is news evidence, not a stored official attendance record; MERON still means no matching evidence.
 - Inquirer, SunStar, and News5/TV5 remain headline-only. News5 currently blocks server-side page fetches with HTTP 403.
 
 ## Place

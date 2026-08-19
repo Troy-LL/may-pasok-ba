@@ -334,8 +334,13 @@ test("a roundup posted a day early still counts on the evening before", () => {
   assert.equal(scored.verdicts.work, "WALA");
 
   const days = summarizeWeek([early], manila, evening);
-  assert.equal(days[0].date, "2026-08-19");
-  assert.equal(days[0].verdicts.classes, "WALA");
+  assert.equal(days.length, 7);
+  assert.equal(days[0].date, "2026-08-18");
+  assert.equal(days.at(-1)?.date, "2026-08-12");
+  assert.equal(
+    days.find((day) => day.date === "2026-08-19"),
+    undefined,
+  );
   assert.equal(
     days.find((day) => day.date === "2026-08-18")?.verdicts.classes,
     "MERON",
@@ -494,13 +499,21 @@ test("an early Friday roundup is not same-day evidence on Wednesday", () => {
   );
   const thursdayEvening = new Date("2026-08-20T12:00:00Z");
   const days = summarizeWeek([friday], manila, thursdayEvening);
-  assert.equal(days[0].date, "2026-08-21");
-  assert.equal(days[0].verdicts.classes, "WALA");
+  assert.equal(days.length, 7);
+  assert.equal(days[0].date, "2026-08-20");
+  assert.equal(days.at(-1)?.date, "2026-08-14");
+  assert.equal(
+    days.find((day) => day.date === "2026-08-21"),
+    undefined,
+  );
   const fridayMorning = new Date("2026-08-20T16:30:00Z");
   assert.equal(
     scoreHeadlines([friday], manila, fridayMorning).verdicts.classes,
     "WALA",
   );
+  const fridayWeek = summarizeWeek([friday], manila, fridayMorning);
+  assert.equal(fridayWeek[0].date, "2026-08-21");
+  assert.equal(fridayWeek[0].verdicts.classes, "WALA");
 });
 
 test("a body-only next-day date still drives the evening board", () => {
@@ -515,7 +528,33 @@ test("a body-only next-day date still drives the evening board", () => {
   assert.equal(scored.verdicts.classes, "WALA");
   assert.equal(scored.verdicts.work, "WALA");
   const days = summarizeWeek([palace], manila, evening);
-  assert.equal(days[0].date, "2026-08-19");
+  assert.equal(days[0].date, "2026-08-18");
+  assert.equal(days.length, 7);
+});
+
+test("the week is today and six days back even if tomorrow already has a roundup", () => {
+  const palace = headline(
+    "#WalangPasok: Work, class suspensions for August 19, 2026 due to habagat rains, floods",
+    "ABS-CBN",
+    "2026-08-18T10:57:00Z",
+    "Malacañang announced the suspension of face-to-face classes in the National Capital Region on Wednesday, August 19.",
+  );
+  const morning = new Date("2026-08-19T00:30:00Z");
+  const days = summarizeWeek([palace], manila, morning);
+  assert.equal(days.length, 7);
+  assert.deepEqual(
+    days.map((day) => day.date),
+    [
+      "2026-08-19",
+      "2026-08-18",
+      "2026-08-17",
+      "2026-08-16",
+      "2026-08-15",
+      "2026-08-14",
+      "2026-08-13",
+    ],
+  );
+  assert.equal(days[0].verdicts.classes, "WALA");
 });
 
 test("NEWS_QUERIES contains keyword-split 7d queries", () => {

@@ -166,8 +166,9 @@ function readWeekly(value: unknown): WeeklyResult {
     }
   }
 
-  return days.length === 7
-    ? { ok: true, days }
+  const clipped = days.slice(0, 7);
+  return clipped.length === 7
+    ? { ok: true, days: clipped }
     : { ok: false, error: "weekly news summary was incomplete" };
 }
 
