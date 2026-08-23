@@ -76,6 +76,10 @@ const ALLOWLIST = [
   "news5",
   "dzbb",
   "dzmm",
+  "philippine news agency",
+  "dzrh",
+  "daily tribune",
+  "malaya business insight",
 ];
 
 function isAllowlisted(source: string): boolean {
@@ -93,6 +97,7 @@ export const NEWS_QUERIES = [
   '("class suspension" OR "classes suspended" OR "suspension of classes" OR "no classes" OR "cancelled classes") when:7d',
   '("work suspension" OR "work suspended" OR "suspension of work" OR "government offices" OR "no work") when:7d',
   '("alternative learning" OR "alternative work" OR "alternative modes" OR "face-to-face classes") when:7d',
+  '("alternative work arrangements" OR "alternative work setup" OR "alternative delivery mode" OR "alternative learning modes" OR "no face-to-face classes") when:7d',
 ];
 
 export function mergeHeadlines(headlineLists: Headline[][]): Headline[] {
@@ -267,7 +272,7 @@ function scoreMatchingHeadlines(
   for (const h of headlines) {
     if (!include(h)) continue;
     if (!isAllowlisted(h.source)) continue;
-    const titleMatches = placeMentions(`${h.title} ${h.source}`, place);
+    const titleMatches = placeMentions(h.title, place);
     const bodyEvidence = h.body
       ? bodyEvidenceForPlace(h.body, place)
       : undefined;

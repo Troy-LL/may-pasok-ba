@@ -243,7 +243,7 @@ export async function cachedHeadlines(
 ): Promise<CachedHeadlines> {
   const entry = decodeHeadlines(await store.get(newsKey(placeId)));
   const missingBodies = Boolean(
-    entry && needsArticleBodies(entry.headlines),
+    entry && needsArticleBodies(entry.headlines, now),
   );
 
   async function refreshBodies(

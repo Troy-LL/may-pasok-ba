@@ -45,17 +45,27 @@ const ISLAND_WIDE: Record<Island, RegExp> = {
 const PROVINCE_WIDE =
   /entire|whole of|all of|province[- ]wide|whole province|lahat ng (?:mga )?(?:bayan|munisipyo|lungsod)|buong/;
 
+const PALACE = /malacanang|malakanyang|palace/;
+
+const WEATHER =
+  /habagat|monsoon|rains?|flood(?:ing)?|storm|bagyo|weather|bagyong/;
+
 const SUSPEND =
-  /walang\s+pasok|suspensions?|suspended?|no\s+classes|no\s+work|cancel(?:led)?\s+class|call(?:ed)?\s+off|alternative\s+(?:learning|work|class|mode)|no\s+face[- ]to[- ]face|face[- ]to[- ]face.{0,48}(?:cancel|suspend|shift|alternative)|learning\s+continuity/;
+  /walang\s+pasok|suspensions?|suspended?|no\s+classes|no\s+face[- ]to[- ]face|no\s+work|cancel(?:led)?\s+(?:class|klase|work)|call(?:ed)?\s+off|shift(?:ed|ing|s)?\s+to\s+(?:an\s+)?alternativ|alternative\s+(?:work\s+)?(?:setups?|arrangements?)|alternative\s+(?:learning|delivery)\s+modes?|alternative\s+(?:learning|work|class|mode)|face[- ]to[- ]face.{0,48}(?:cancel|suspend|shift|alternative)|learning\s+continuity/;
 
 const LIFTED =
-  /may\s+pasok|classes\s+resume|suspension\s+lifted|no\s+suspension|hindi\s+suspend/;
+  /may\s+pasok|classes?\s+resumes?|resumption|suspension\s+lifted|no\s+suspension|hindi\s+suspend/;
+
+const META =
+  /\bno\s*[-\u2013]?\s*work\s*,?\s*no\s*[-\u2013]?\s*pay\b|\b(?:vows?|slams?|urges?|seeks?|mulls?|eyeing|pushes?|pushing|demands?|reviews?|reviewing|probes?|probing|protocols?|delays?|delayed|delaying|bills?)\b/;
 
 export function placeMentions(text: string, place: PlaceRef): boolean {
   const t = fold(text);
   if (NATIONWIDE.test(t)) return true;
   if (place.ncr && NCR.test(t)) return true;
   if (ISLAND_WIDE[place.island].test(t)) return true;
+  // Palace weather orders (memo circulars) always list NCR first.
+  if (PALACE.test(t) && WEATHER.test(t)) return true;
 
   const names = [place.name, ...place.aliases];
   if (names.some((n) => hasPhrase(text, n))) return true;
@@ -75,14 +85,14 @@ export function classifyHeadline(title: string): Record<Kind, boolean> {
   if (!SUSPEND.test(t)) {
     return { classes: false, work: false, government: false };
   }
-  if (LIFTED.test(t) && !/walang\s+pasok/.test(t)) {
+  const walangPasok = /walang\s+pasok/.test(t);
+  if (!walangPasok && (LIFTED.test(t) || META.test(t))) {
     return { classes: false, work: false, government: false };
   }
 
-  const walangPasok = /walang\s+pasok/.test(t);
   const classes =
     walangPasok ||
-    /class|klase|school|deped|face[- ]to[- ]face|all levels|alternative\s+learning|alternative\s+mode/.test(
+    /class|klase|school|deped|face[- ]to[- ]face|f2f|all levels|alternative\s+learning|alternative\s+mode/.test(
       t,
     );
   const work =
@@ -90,7 +100,7 @@ export function classifyHeadline(title: string): Record<Kind, boolean> {
       t,
     );
   const government =
-    /government|gobyerno|(?:^|[^a-z0-9])lgu(?:$|[^a-z0-9])|govt?\s+office|skeletal/.test(
+    /government|gobyerno|gov'?t|\bpalace\b|malacanang|(?:^|[^a-z0-9])lgu(?:$|[^a-z0-9])|gov(?:ernment)?\s+office|skeletal/.test(
       t,
     );
 

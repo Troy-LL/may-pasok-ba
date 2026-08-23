@@ -159,7 +159,7 @@ function regionWideEvidence(text: string): string | undefined {
   const region =
     "(?:metro manila|national capital region|kalakhang maynila|(?:^|[^a-z0-9])ncr(?:$|[^a-z0-9]))";
   const suspension =
-    /(?:walang\s+pasok|suspensions?|suspended?|no\s+(?:face[- ]to[- ]face\s+)?(?:classes|work)|classes?\s+(?:are|were)?\s*called\s+off|alternative\s+(?:learning|work|class|mode)|no\s+face[- ]to[- ]face|learning\s+continuity)/
+    /(?:walang\s+pasok|suspensions?|suspended?|suspending|no\s+(?:face[- ]to[- ]face\s+)?(?:classes|work)|classes?\s+(?:are|were)?\s*called\s+off|shift(?:ed|ing)?\s+to\s+(?:an\s+)?alternativ\w*|alternative\s+(?:learning|work|class|mode)|alternative\s+(?:work\s+)?(?:setups?|arrangements?)|alternative\s+(?:learning|delivery)\s+modes?|no\s+face[- ]to[- ]face|learning\s+continuity)/
       .source;
   const patterns = [
     new RegExp(
@@ -179,6 +179,9 @@ function regionWideEvidence(text: string): string | undefined {
   return undefined;
 }
 
+const DATELINE =
+  /^\s*[A-Z][A-Za-z .'’-]{1,60},?\s+(?:Philippines\s*)?[—–]\s+/;
+
 export function bodyEvidenceForPlace(
   body: string,
   place: Place,
@@ -186,23 +189,15 @@ export function bodyEvidenceForPlace(
   const regionWide = regionWideEvidence(body);
   if (place.kind === "region") return regionWide;
 
-  const folded = fold(body);
+  // A "MANILA — ..." opener is a dateline, not evidence about Manila.
+  const stripped = body.replace(DATELINE, "");
+  // Split before folding: fold() removes periods, destroying sentence boundaries.
+  const segments = stripped.split(/[.;\n]+/);
   const snippets: string[] = [];
   for (const name of [place.name, ...place.aliases]) {
-    if (!hasPhrase(body, name)) continue;
-    const index = folded.indexOf(fold(name));
-    if (index >= 0) {
-      const boundaries = ["\n", ".", ";"];
-      const start = Math.max(
-        0,
-        ...boundaries.map((boundary) => body.lastIndexOf(boundary, index) + 1),
-      );
-      const ends = boundaries
-        .map((boundary) => body.indexOf(boundary, index + name.length))
-        .filter((end) => end >= 0);
-      const end = ends.length > 0 ? Math.min(...ends) : body.length;
-      snippets.push(body.slice(start, end));
-    }
+    const segment = segments.find((part) => hasPhrase(part, name));
+    if (!segment) continue;
+    if (!snippets.includes(segment)) snippets.push(segment);
   }
   if (snippets.length > 0) return snippets.join(" ");
   return place.ncr ? regionWide : undefined;

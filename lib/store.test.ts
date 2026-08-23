@@ -74,7 +74,7 @@ test("fresh cache entries skip the network", async () => {
 });
 
 test("fresh cache still refreshes when Google links have no article body", async () => {
-  const now = new Date("2026-08-13T21:00:00Z");
+  const now = new Date("2026-08-18T21:00:00Z");
   const googleHeadline: Headline = {
     title: "WALANG PASOK: Class suspensions for Wednesday, August 19, 2026",
     link: "https://news.google.com/rss/articles/CBMi123",
@@ -84,7 +84,7 @@ test("fresh cache still refreshes when Google links have no article body", async
   const { store, data } = memoryStore({
     [newsKey("ncr")]: encodeHeadlines(
       [googleHeadline],
-      new Date("2026-08-13T20:55:00Z"),
+      new Date("2026-08-18T20:55:00Z"),
     ),
   });
 
@@ -118,7 +118,7 @@ test("fresh cache still refreshes when Google links have no article body", async
 });
 
 test("fresh cache can await missing article bodies before returning", async () => {
-  const now = new Date("2026-08-13T21:00:00Z");
+  const now = new Date("2026-08-18T21:00:00Z");
   const googleHeadline: Headline = {
     title: "WALANG PASOK: Class suspensions for Wednesday, August 19, 2026",
     link: "https://news.google.com/rss/articles/CBMi123",
@@ -128,7 +128,7 @@ test("fresh cache can await missing article bodies before returning", async () =
   const { store, data } = memoryStore({
     [newsKey("ncr")]: encodeHeadlines(
       [googleHeadline],
-      new Date("2026-08-13T20:55:00Z"),
+      new Date("2026-08-18T20:55:00Z"),
     ),
   });
 
@@ -155,7 +155,7 @@ test("fresh cache can await missing article bodies before returning", async () =
 });
 
 test("stale cache still awaits missing article bodies before returning", async () => {
-  const now = new Date("2026-08-13T21:00:00Z");
+  const now = new Date("2026-08-18T21:00:00Z");
   const googleHeadline: Headline = {
     title: "WALANG PASOK: Class suspensions for Wednesday, August 19, 2026",
     link: "https://news.google.com/rss/articles/CBMi123",
@@ -165,7 +165,7 @@ test("stale cache still awaits missing article bodies before returning", async (
   const { store, data } = memoryStore({
     [newsKey("ncr")]: encodeHeadlines(
       [googleHeadline],
-      new Date("2026-08-13T18:00:00Z"),
+      new Date("2026-08-18T18:00:00Z"),
     ),
   });
 
@@ -197,7 +197,7 @@ test("stale cache still awaits missing article bodies before returning", async (
 });
 
 test("missing bodies attach to the cached headlines without refetching RSS", async () => {
-  const now = new Date("2026-08-13T21:00:00Z");
+  const now = new Date("2026-08-18T21:00:00Z");
   const googleHeadline: Headline = {
     title: "WALANG PASOK: Class suspensions for Wednesday, August 19, 2026",
     link: "https://news.google.com/rss/articles/CBMi123",
@@ -207,7 +207,7 @@ test("missing bodies attach to the cached headlines without refetching RSS", asy
   const { store, data } = memoryStore({
     [newsKey("ncr")]: encodeHeadlines(
       [googleHeadline],
-      new Date("2026-08-13T18:00:00Z"),
+      new Date("2026-08-18T18:00:00Z"),
     ),
   });
 
@@ -241,7 +241,7 @@ test("missing bodies attach to the cached headlines without refetching RSS", asy
 });
 
 test("fresh cache still refreshes when a resolved publisher URL has no article body", async () => {
-  const now = new Date("2026-08-13T21:00:00Z");
+  const now = new Date("2026-08-18T21:00:00Z");
   const publisherHeadline: Headline = {
     title: "WALANG PASOK: Class suspensions for Wednesday, August 19, 2026",
     link: "https://www.abs-cbn.com/news/aug19",
@@ -251,7 +251,7 @@ test("fresh cache still refreshes when a resolved publisher URL has no article b
   const { store, data } = memoryStore({
     [newsKey("ncr")]: encodeHeadlines(
       [publisherHeadline],
-      new Date("2026-08-13T20:55:00Z"),
+      new Date("2026-08-18T20:55:00Z"),
     ),
   });
 
