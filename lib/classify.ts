@@ -120,6 +120,6 @@ export function verdictsFromFlags(flags: Record<Kind, boolean>): Record<
 
 export function isFresh(publishedAt: Date, now: Date): boolean {
   const age = now.getTime() - publishedAt.getTime();
-  // ponytail: 36h window so last-night LGU posts still count at 5am
+  // ponytail: 36h window so last-night LGU posts still count at 5am; revisit when a wrong-answer report traces to this window
   return age >= -5 * 60 * 1000 && age <= 36 * 60 * 60 * 1000;
 }
